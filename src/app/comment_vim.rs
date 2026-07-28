@@ -167,6 +167,34 @@ impl App {
         });
     }
 
+    /// Remember that helix's `g` prefix was typed in the comment box, so the
+    /// next key is read as a goto motion instead of reaching edtui.
+    pub fn arm_comment_helix_goto(&mut self) {
+        self.comment_helix_goto_pending = true;
+    }
+
+    /// Translate the key after a helix `g` into the edtui keys that perform the
+    /// same motion, or `None` when no `g` is pending. An unrecognized key
+    /// replays `g` followed by itself, so edtui's own `g` sequences still work.
+    pub fn take_comment_helix_goto(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+    ) -> Option<Vec<crossterm::event::KeyEvent>> {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        if !std::mem::take(&mut self.comment_helix_goto_pending) {
+            return None;
+        }
+        let plain = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        Some(match key.code {
+            KeyCode::Char('g') => vec![plain(KeyCode::Char('g')), plain(KeyCode::Char('g'))],
+            KeyCode::Char('e') => vec![KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT)],
+            KeyCode::Char('h') => vec![plain(KeyCode::Home)],
+            KeyCode::Char('l') => vec![plain(KeyCode::End)],
+            _ => vec![plain(KeyCode::Char('g')), key],
+        })
+    }
+
     /// Toggle vim modal editing for the comment box.
     pub fn toggle_comment_vim(&mut self) {
         self.set_comment_vim(!self.comment_vim_enabled);

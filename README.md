@@ -237,6 +237,7 @@ ignore_whitespace = false    # ignore all whitespace in local VCS diffs
 appearance = "system"        # or "dark" / "light"
 mouse = true
 leader = ";"                  # configurable prefix for leader shortcuts
+keymap = "vim"                # or "helix"
 comment_vim = false           # vim modal editing in the review comment box
 relative_line_numbers = false # show rendered-row distances in the diff gutter
 
@@ -289,7 +290,8 @@ A first-session cheatsheet. Press `?` inside tuicr for the full reference.
 | `Tab` in `:` prompt | Complete or cycle commands |
 | `?` | Toggle full help |
 
-Full reference in [docs/KEYBINDINGS.md](docs/KEYBINDINGS.md).
+Full reference in [docs/KEYBINDINGS.md](docs/KEYBINDINGS.md), including the
+[helix keymap](docs/KEYBINDINGS.md#helix-keymap) (`keymap = "helix"`).
 
 ## Sponsors
 

@@ -4,6 +4,10 @@ Full reference. Press `?` inside tuicr for an in-app version of this list.
 
 `<leader>` defaults to `;`. Override it with `leader = ","` in `~/.config/tuicr/config.toml`.
 
+The tables below are the default vim keymap. For the helix keymap
+(`keymap = "helix"`), see [Helix keymap](#helix-keymap) — everything not listed
+there is the same in both.
+
 ## Navigation
 
 | Key | Action |
@@ -181,6 +185,35 @@ terminals like zellij web. `Tab` cycles the comment type in Normal
 mode and inserts `comment_tab_width` spaces (default 4) in Insert mode; `Ctrl-s`
 also saves.
 
+## Helix keymap
+
+Set `keymap = "helix"` in `~/.config/tuicr/config.toml`, or run `:set keymap helix`
+(`:set keymap vim` goes back). Only the keys below change; everything else in
+this document works the same in both keymaps.
+
+| Vim | Helix | Action |
+|-----|-------|--------|
+| `g` | `gg` | Go to first file |
+| `G` | `ge` | Go to last file |
+| `{N}G` | `{N}G` | Go to source line N (in helix `G` needs a count; on its own it does nothing) |
+| — | `gh` / `gl` | Scroll to line start / end |
+| `V` | `x` | Enter visual mode for range comments (`v` works in both) |
+| `V` (in visual mode) | `x` | Extend the selection down one line |
+| `V` cancels visual mode | `v` cancels | `Esc` cancels in both; `V` is unbound in helix |
+
+Everything else is deliberately shared, because helix and vim either agree or
+the key has no helix counterpart in a review pager: `hjkl`, `Ctrl-d/u/f/b`,
+`Ctrl-e/y`, `n`/`N`, `/`, `:`, `zz`/`zt`/`zb`, `dd`, `i`, `A`, `c`/`C`, `r`/`R`,
+`y`, `m`/`M`, `{`/`}`, `[`/`]`, `(`/`)`, `o`/`O`, `q`, `ZZ`/`ZQ`, counts, and
+every dialog and selector key.
+
+Helix's leader is `Space`, but `Space` toggles directory expansion here. Set
+`leader = " "` if you want the helix leader anyway.
+
+In the comment box (`comment_vim = true`) the helix keymap adds the goto prefix
+only: `gg` start of comment, `ge` end, `gh` / `gl` line start / end. Insert mode
+and every other normal-mode key stay vim.
+
 ## Commands
 
 In command mode,
@@ -198,6 +231,7 @@ In command mode,
 | `:summary` | Show all pending local-draft comments; `j`/`k` select and `Enter` jumps |
 | `:diff` | Toggle diff view (unified / side-by-side) |
 | `:vim` / `:novim` (`:set vim` / `:set novim`) | Enable/toggle/disable vim modal editing in the comment box (overrides `comment_vim`) |
+| `:set keymap vim` / `:set keymap helix` | Switch the key table for this session (overrides `keymap`) |
 | `:commits` | Select commits to review |
 | `:submit` | Open submit picker (Comment / Approve / Request changes / Draft) |
 | `:submit comment` | Submit a Comment review |
