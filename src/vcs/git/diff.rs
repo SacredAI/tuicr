@@ -7,7 +7,7 @@ use crate::syntax::{SyntaxHighlighter, needs_full_file_highlight};
 use crate::vcs::traits::{
     ChangeKind, DiffWhitespaceMode, ResolvedRevisionRange, RevisionDiffTarget,
 };
-use crate::vcs::{enhance_with_full_file_highlight, tabify};
+use crate::vcs::{enhance_with_full_file_highlight, intraline, tabify};
 
 pub fn get_working_tree_diff(
     repo: &Repository,
@@ -249,6 +249,10 @@ pub fn get_working_tree_with_commits_diff(
 fn diff_options(whitespace_mode: DiffWhitespaceMode) -> DiffOptions {
     let mut opts = DiffOptions::new();
     opts.ignore_whitespace(whitespace_mode.ignores_all());
+    // The Git CLI turns the indent heuristic on by default; libgit2 does not.
+    // Without it, hunk boundaries slide onto the wrong blank line or closing
+    // brace when a block is inserted next to a similar one.
+    opts.indent_heuristic(true);
     opts
 }
 
@@ -292,13 +296,14 @@ fn parse_diff(diff: &Diff, highlighter: &SyntaxHighlighter) -> Result<Vec<DiffFi
             delta.status() == Delta::Untracked && delta.new_file().size() > MAX_UNTRACKED_FILE_SIZE;
 
         let syntax_path = new_path.as_ref().or(old_path.as_ref()).map(|p| p.as_path());
-        let hunks = if is_binary || is_too_large {
+        let mut hunks = if is_binary || is_too_large {
             Vec::new()
         } else {
             parse_hunks(diff, delta_idx, highlighter, syntax_path)?
         };
 
         let content_hash = DiffFile::compute_content_hash(&hunks);
+        intraline::annotate_hunks(&mut hunks);
         files.push(DiffFile {
             old_path,
             new_path,
@@ -391,6 +396,7 @@ fn parse_hunks(
                     old_lineno,
                     new_lineno,
                     highlighted_spans,
+                    intraline: Vec::new(),
                 });
             }
 
@@ -450,6 +456,43 @@ mod tests {
         let result = parse_diff(&diff, &highlighter);
 
         assert!(matches!(result, Err(TuicrError::NoChanges)));
+    }
+
+    /// libgit2 leaves the indent heuristic off by default, so a block pasted
+    /// over a partial copy of itself lands with the boundary one line too late:
+    /// the closing `}` reads as added and the pasted `if` as context. The Git
+    /// CLI has never had that problem, and neither should the libgit2 backend.
+    #[test]
+    fn should_place_hunk_boundary_on_the_pasted_block() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let repo = Repository::init(temp_dir.path()).expect("failed to init repo");
+
+        create_initial_commit(
+            &repo,
+            "f.rs",
+            "impl Foo {\n    fn b(&self) -> u32 {\n        let x = 2;\n        if x > 0 {\n            return x;\n        }\n        x + 2\n    }\n}\n",
+        );
+        fs::write(
+            temp_dir.path().join("f.rs"),
+            "impl Foo {\n    fn b(&self) -> u32 {\n        let x = 2;\n        if x > 0 {\n            return x;\n        if x > 0 {\n            return x;\n        }\n        x + 2\n    }\n}\n",
+        )
+        .expect("failed to update file");
+
+        let files = get_working_tree_diff(
+            &repo,
+            DiffWhitespaceMode::Normal,
+            &SyntaxHighlighter::default(),
+        )
+        .expect("failed to get diff");
+
+        let added: Vec<&str> = files[0].hunks[0]
+            .lines
+            .iter()
+            .filter(|l| l.origin == LineOrigin::Addition)
+            .map(|l| l.content.as_str())
+            .collect();
+
+        assert_eq!(added, vec!["        if x > 0 {", "            return x;"]);
     }
 
     #[test]

@@ -90,21 +90,19 @@ impl GitCliBackend {
 
     fn get_cli_diff(
         &self,
-        mut args: Vec<String>,
+        args: Vec<String>,
         include_untracked: bool,
         old_source: GitContentSource<'_>,
         new_source: GitContentSource<'_>,
         highlighter: &SyntaxHighlighter,
     ) -> Result<Vec<DiffFile>> {
+        let args = pin_diff_flags(args, self.whitespace_mode.ignores_all());
         // Paths and status come from Git's NUL-delimited raw records. Patch
         // headers remain display-only and may follow any user quoting/prefix
         // configuration without affecting file identity.
         args.insert(1, "-z".to_string());
         args.insert(1, "--raw".to_string());
         args.insert(1, "--patch".to_string());
-        if self.whitespace_mode.ignores_all() {
-            args.insert(1, "--ignore-all-space".to_string());
-        }
         let mut files = match run_git_diff_command(
             &self.root_path,
             args,
@@ -617,6 +615,21 @@ fn has_untracked_changes(workdir: &Path, pathspecs: &[String]) -> Result<bool> {
     }
 
     Ok(false)
+}
+
+/// Pin the diff shape so a review is independent of the user's Git config.
+fn pin_diff_flags(mut args: Vec<String>, ignore_all_space: bool) -> Vec<String> {
+    let mut flags = vec![
+        "--src-prefix=a/".to_string(),
+        "--dst-prefix=b/".to_string(),
+        "--diff-algorithm=histogram".to_string(),
+        "--indent-heuristic".to_string(),
+    ];
+    if ignore_all_space {
+        flags.push("--ignore-all-space".to_string());
+    }
+    args.splice(1..1, flags);
+    args
 }
 
 fn run_git_diff_command(
