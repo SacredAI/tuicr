@@ -237,6 +237,7 @@ impl FileBackend {
                 old_lineno,
                 new_lineno: Some(line_num),
                 highlighted_spans,
+                intraline: Vec::new(),
             });
         }
 

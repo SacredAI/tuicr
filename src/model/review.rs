@@ -259,6 +259,7 @@ mod tests {
                 old_lineno: Some(new_start),
                 new_lineno: Some(new_start),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             }],
             old_start: new_start,
             old_count: 1,

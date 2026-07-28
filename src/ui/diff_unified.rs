@@ -16,7 +16,8 @@ use crate::theme::Theme;
 use crate::ui::comment_panel;
 use crate::ui::diff_view::{
     apply_horizontal_scroll, comment_box_visible, comment_type_presentation, cursor_indicator,
-    cursor_indicator_spaced, diff_stat_title, hunk_header_text_and_style,
+    cursor_indicator_spaced,
+    diff_line_content_spans, diff_stat_title, hunk_header_text_and_style,
     paint_cursor_line_highlight, paint_unified_diff_rows_with, paint_visual_selection_overlay,
     populate_row_to_annotation, push_comment_bar, render_expander_line, render_hidden_lines,
     scroll_comment_input_into_view, skip_comment_box, unified_line_bg_style,
@@ -630,12 +631,10 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
                         ];
                         let content_start = line_spans.len();
 
-                        if let Some(ref highlighted) = diff_line.highlighted_spans {
-                            for (span_style, span_text) in highlighted {
-                                line_spans.push(Span::styled(span_text.clone(), *span_style));
-                            }
-                        } else {
-                            line_spans.push(Span::styled(diff_line.content.clone(), style));
+                        for (span_style, span_text) in
+                            diff_line_content_spans(&app.theme, diff_line, style)
+                        {
+                            line_spans.push(Span::styled(span_text, span_style));
                         }
 
                         // Mark add/del lines with their effective EOL style so we can paint full
@@ -654,11 +653,18 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
                                         LineOrigin::Deletion => app.theme.syntax_del_bg,
                                         LineOrigin::Context => app.theme.panel_bg,
                                     };
-                                    let base = line_spans.last().map(|s| s.style).unwrap_or(style);
+                                    // Trailing fill takes the line's own colours, never the
+                                    // stronger tint of a word-level change that happens to
+                                    // end the line.
+                                    let base = line_spans
+                                        .last()
+                                        .filter(|_| diff_line.intraline.is_empty())
+                                        .map(|s| s.style)
+                                        .unwrap_or(style);
                                     base.bg(syntax_bg)
                                 }
                                 // Non-highlighted lines keep classic diff background.
-                                None => line_spans.last().map(|s| s.style).unwrap_or(style),
+                                None => style,
                             };
                             // Zero-width marker span carrying the background style.
                             Span::styled(String::new(), eol_style)
@@ -1545,6 +1551,7 @@ mod remote_comments_snapshot_tests {
                 old_lineno: Some(1),
                 new_lineno: Some(1),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             },
             DiffLine {
                 origin: LineOrigin::Addition,
@@ -1552,6 +1559,7 @@ mod remote_comments_snapshot_tests {
                 old_lineno: None,
                 new_lineno: Some(2),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             },
         ];
         let hunk = DiffHunk {
@@ -1732,6 +1740,7 @@ mod remote_comments_snapshot_tests {
                 old_lineno: None,
                 new_lineno: Some(i as u32 + 1),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             })
             .collect();
         let new_count = lines.len() as u32;
@@ -1970,6 +1979,7 @@ mod remote_comments_snapshot_tests {
                 old_lineno: None,
                 new_lineno: Some(1),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             }],
             old_start: 0,
             old_count: 0,
@@ -2187,6 +2197,7 @@ mod remote_comments_snapshot_tests {
                 old_lineno: None,
                 new_lineno: Some(1),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             }],
             old_start: 0,
             old_count: 0,

@@ -15,6 +15,7 @@ pub(crate) mod diff_parser;
 pub mod file;
 pub mod git;
 mod hg;
+pub(crate) mod intraline;
 mod jj;
 pub mod pr_noop;
 pub mod pristine;
@@ -89,6 +90,7 @@ pub(crate) fn slice_context_lines(content: &str, start_line: u32, end_line: u32)
             old_lineno: Some(line_num),
             new_lineno: Some(line_num),
             highlighted_spans: None,
+            intraline: Vec::new(),
         });
     }
     result
@@ -433,6 +435,7 @@ mod tests {
                     old_lineno: Some(target_line),
                     new_lineno: None,
                     highlighted_spans: None,
+                    intraline: Vec::new(),
                 },
                 DiffLine {
                     origin: LineOrigin::Addition,
@@ -440,6 +443,7 @@ mod tests {
                     old_lineno: None,
                     new_lineno: Some(target_line),
                     highlighted_spans: None,
+                    intraline: Vec::new(),
                 },
             ],
             old_start: target_line,

@@ -49,6 +49,7 @@ fn build_scroll_app(n: usize, viewport: usize, scroll_offset_config: usize) -> A
             old_lineno: Some(i as u32),
             new_lineno: Some(i as u32),
             highlighted_spans: None,
+            intraline: Vec::new(),
         })
         .collect();
 

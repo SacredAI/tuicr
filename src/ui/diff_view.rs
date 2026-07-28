@@ -260,6 +260,55 @@ pub(super) fn diff_stat_title(app: &App) -> Line<'static> {
     ])
 }
 
+/// Style/text pairs for a diff line's content: its syntax highlighting when it
+/// has any, otherwise one span in `base`, with the word-level changes recorded
+/// by the parser tinted more strongly.
+///
+/// Emphasis is skipped when the highlighted spans do not reconstruct `content`
+/// exactly, since the recorded ranges are byte offsets into `content`.
+pub(super) fn diff_line_content_spans(
+    theme: &Theme,
+    line: &DiffLine,
+    base: Style,
+) -> Vec<(Style, String)> {
+    let spans: Vec<(Style, String)> = match line.highlighted_spans {
+        Some(ref highlighted) => highlighted.clone(),
+        None => vec![(base, line.content.clone())],
+    };
+
+    if line.intraline.is_empty() {
+        return spans;
+    }
+    let spanned: usize = spans.iter().map(|(_, text)| text.len()).sum();
+    if spanned != line.content.len() {
+        return spans;
+    }
+
+    let mut out = Vec::with_capacity(spans.len() + line.intraline.len() * 2);
+    let mut offset = 0;
+    for (style, text) in spans {
+        let emphasized = styles::intraline_emphasis(theme, style, line.origin);
+        let mut cut = 0;
+        for range in &line.intraline {
+            let start = range.start.saturating_sub(offset).min(text.len());
+            let end = range.end.saturating_sub(offset).min(text.len());
+            if start >= end {
+                continue;
+            }
+            if cut < start {
+                out.push((style, text[cut..start].to_string()));
+            }
+            out.push((emphasized, text[start..end].to_string()));
+            cut = end;
+        }
+        if cut < text.len() {
+            out.push((style, text[cut..].to_string()));
+        }
+        offset += text.len();
+    }
+    out
+}
+
 pub(super) fn cursor_indicator(line_idx: usize, current_line_idx: usize) -> &'static str {
     if line_idx == current_line_idx {
         "▶"
@@ -1134,6 +1183,89 @@ pub(super) fn apply_horizontal_scroll(line: Line, scroll_x: usize) -> Line {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::model::LineOrigin;
+    use ratatui::style::Color;
+
+    /// Build the added line of a one-line change, carrying the word ranges the
+    /// diff loader would have recorded for it.
+    fn added_line(removed: &str, added: &str) -> DiffLine {
+        let (_, ranges) = crate::vcs::intraline::changed_ranges(removed, added)
+            .expect("test lines should align word by word");
+        DiffLine {
+            origin: LineOrigin::Addition,
+            content: added.to_string(),
+            old_lineno: None,
+            new_lineno: Some(1),
+            highlighted_spans: None,
+            intraline: ranges,
+        }
+    }
+
+    /// Text is preserved exactly and only the changed word gets the stronger
+    /// background, so a word-level highlight can never drop or duplicate code.
+    #[test]
+    fn should_split_a_plain_line_around_the_changed_word() {
+        let theme = Theme::dark();
+        let base = styles::diff_add_style(&theme);
+        let line = added_line("let n = one();", "let n = two();");
+
+        let spans = diff_line_content_spans(&theme, &line, base);
+
+        assert_eq!(
+            spans.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>(),
+            vec!["let n = ", "two", "();"]
+        );
+        assert_eq!(spans[0].0.bg, base.bg);
+        assert_eq!(spans[2].0.bg, base.bg);
+        assert_ne!(spans[1].0.bg, base.bg);
+    }
+
+    /// A changed range that straddles two syntax spans keeps each span's own
+    /// foreground colour and only strengthens the background.
+    #[test]
+    fn should_emphasize_across_a_syntax_span_boundary() {
+        let theme = Theme::dark();
+        let keyword = Style::default().fg(Color::Rgb(200, 100, 200));
+        let ident = Style::default().fg(Color::Rgb(100, 200, 100));
+        // "value" changed, but the syntax spans break two characters into it.
+        let mut line = added_line("let other = 1;", "let value = 1;");
+        line.highlighted_spans = Some(vec![
+            (keyword, "let va".to_string()),
+            (ident, "lue = 1;".to_string()),
+        ]);
+
+        let spans = diff_line_content_spans(&theme, &line, styles::diff_add_style(&theme));
+
+        let emphasis = styles::intraline_emphasis(&theme, keyword, LineOrigin::Addition).bg;
+        assert!(emphasis.is_some(), "emphasis must change the background");
+        assert_eq!(
+            spans
+                .iter()
+                .map(|(s, t)| (s.fg, s.bg, t.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (keyword.fg, None, "let "),
+                (keyword.fg, emphasis, "va"),
+                (ident.fg, emphasis, "lue"),
+                (ident.fg, None, " = 1;"),
+            ]
+        );
+    }
+
+    /// The recorded ranges are byte offsets into `content`. If the syntax spans
+    /// do not reconstruct it, slicing them would land on the wrong bytes, so
+    /// the line renders without emphasis instead.
+    #[test]
+    fn should_skip_emphasis_when_spans_do_not_reconstruct_the_content() {
+        let mut line = added_line("let other = 1;", "let value = 1;");
+        line.highlighted_spans = Some(vec![(Style::default(), "let".to_string())]);
+
+        let spans = diff_line_content_spans(&Theme::dark(), &line, Style::default());
+
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].1, "let");
+    }
 
     #[test]
     fn should_not_scroll_when_comment_box_already_visible() {

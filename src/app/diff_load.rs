@@ -67,6 +67,7 @@ impl App {
                 old_lineno: None,
                 new_lineno: Some(i as u32 + 1),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             })
             .collect();
         let line_count = diff_lines.len() as u32;

@@ -43,6 +43,7 @@ fn hunk(start: u32, count: u32) -> DiffHunk {
             old_lineno: Some(start + i),
             new_lineno: Some(start + i),
             highlighted_spans: None,
+            intraline: Vec::new(),
         })
         .collect();
     DiffHunk {

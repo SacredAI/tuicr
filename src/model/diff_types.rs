@@ -1,6 +1,6 @@
 use ratatui::style::Style;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, ops::Range, path::PathBuf};
 
 use crate::hash::Fnv1aHasher;
 use crate::model::comment::LineSide;
@@ -79,6 +79,10 @@ pub struct DiffLine {
     /// Optional syntax-highlighted spans for this line
     /// If None, use the default diff coloring
     pub highlighted_spans: Option<Vec<(Style, String)>>,
+    /// Byte ranges into `content` that differ from the line this one was paired
+    /// with on the other side of the change. Empty when the line has no pair,
+    /// or when the pair was too dissimilar to align word by word.
+    pub intraline: Vec<Range<usize>>,
 }
 
 #[derive(Debug, Clone)]

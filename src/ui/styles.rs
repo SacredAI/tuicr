@@ -1,5 +1,6 @@
 use ratatui::style::{Color, Modifier, Style};
 
+use crate::model::LineOrigin;
 use crate::theme::Theme;
 
 pub fn selected_style(theme: &Theme) -> Style {
@@ -16,6 +17,43 @@ pub fn diff_add_style(theme: &Theme) -> Style {
 
 pub fn diff_del_style(theme: &Theme) -> Style {
     Style::default().fg(theme.diff_del).bg(theme.diff_del_bg)
+}
+
+/// Fraction of the diff accent mixed into a background to mark the words that
+/// actually changed on an added/removed line. Low enough that syntax colours
+/// stay readable on top, high enough to read as a separate block.
+const EMPHASIS_MIX: f32 = 0.35;
+
+/// Strengthen `base` so the changed words on an added or removed line stand out
+/// from the rest of the line. Themes that use terminal palette colours instead
+/// of RGB cannot be mixed, so those fall back to bold.
+pub fn intraline_emphasis(theme: &Theme, base: Style, origin: LineOrigin) -> Style {
+    let (accent, line_bg) = match origin {
+        LineOrigin::Addition => (theme.diff_add, theme.syntax_add_bg),
+        LineOrigin::Deletion => (theme.diff_del, theme.syntax_del_bg),
+        LineOrigin::Context => return base,
+    };
+    // A syntax span without its own background sits on the line's diff tint, so
+    // that is what the emphasis has to strengthen.
+    match (base.bg.unwrap_or(line_bg), accent) {
+        (Color::Rgb(br, bg, bb), Color::Rgb(ar, ag, ab)) => {
+            base.bg(mix((br, bg, bb), (ar, ag, ab)))
+        }
+        _ => base.add_modifier(Modifier::BOLD),
+    }
+}
+
+fn mix(base: (u8, u8, u8), accent: (u8, u8, u8)) -> Color {
+    let blend = |b: u8, a: u8| {
+        (b as f32 + (a as f32 - b as f32) * EMPHASIS_MIX)
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
+    Color::Rgb(
+        blend(base.0, accent.0),
+        blend(base.1, accent.1),
+        blend(base.2, accent.2),
+    )
 }
 
 pub fn diff_context_style(theme: &Theme) -> Style {

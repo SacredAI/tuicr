@@ -36,6 +36,8 @@ src/
 │   ├── mod.rs           # detect_vcs(): auto-detect VCS (jj first, then git, then hg)
 │   ├── traits.rs        # VcsBackend trait, VcsInfo, VcsType, CommitInfo
 │   ├── diff_parser.rs   # Strict, count-driven hunk parser over structured FilePatch values
+│   ├── intraline.rs     # Word-level ranges per removed/added line pair, recorded
+│   │                    # on DiffLine.intraline at parse time (once, not per frame)
 │   ├── git/             # Git backend selector (libgit2 by default, CLI for sparse/opt-in)
 │   │   ├── mod.rs       # GitBackend wrapper, backend preference, repo mode detection
 │   │   ├── cli.rs       # Git CLI backend used for sparse checkouts and backend = "cli"
@@ -220,6 +222,8 @@ Repository-managed agent integrations:
 - **Clipboard**: Uses `arboard` crate for cross-platform clipboard support
 - **Hunk navigation**: `next_hunk()`/`prev_hunk()` calculate positions by iterating through files
 - **Ignore filtering**: `.tuicrignore` is applied whenever diffs are loaded/reloaded
+- **Diff flags are pinned, not inherited**: the Git CLI backend passes `--diff-algorithm=histogram` and `--indent-heuristic` (see `pin_diff_flags`), and the libgit2 backend sets `indent_heuristic` — which libgit2, unlike the Git CLI, leaves off by default. A review must not change shape with the user's `diff.*` config. libgit2 has no histogram equivalent, so the two Git backends can pick different hunk boundaries on the same commit.
+- **Word-level highlight**: `DiffLine.intraline` holds byte ranges into `content`. `ui::diff_view::diff_line_content_spans` is the single place that splits a line's spans on them; both diff views go through it.
 - **File-tree filters**: `i`/`e` regex filters narrow the tree *and* the diff at render/measure
   time (`App::file_passes_filter`), unlike `.tuicrignore` which drops files at load time. They
   are session-local and never persisted

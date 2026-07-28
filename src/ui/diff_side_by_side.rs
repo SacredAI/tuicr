@@ -47,11 +47,10 @@ fn content_spans_for_diff_line(
         LineOrigin::Addition => styles::diff_add_style(theme),
         LineOrigin::Deletion => styles::diff_del_style(theme),
     };
-    let spans: Vec<Span<'static>> = if let Some(ref h) = dl.highlighted_spans {
-        h.iter().map(|(s, t)| Span::styled(t.clone(), *s)).collect()
-    } else {
-        vec![Span::styled(dl.content.clone(), base)]
-    };
+    let spans = crate::ui::diff_view::diff_line_content_spans(theme, dl, base)
+        .into_iter()
+        .map(|(style, text)| Span::styled(text, style))
+        .collect();
     match search {
         Some((needle, hl)) => apply_search_highlight_spans(spans, needle, hl),
         None => spans,

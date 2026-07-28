@@ -33,6 +33,7 @@ impl VcsBackend for MockVcs {
                 old_lineno: Some(line_num),
                 new_lineno: Some(line_num),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             });
         }
         Ok(result)
@@ -57,6 +58,7 @@ fn make_hunk(new_start: u32, new_count: u32) -> DiffHunk {
             old_lineno: Some(new_start + i),
             new_lineno: Some(new_start + i),
             highlighted_spans: None,
+            intraline: Vec::new(),
         });
     }
     DiffHunk {

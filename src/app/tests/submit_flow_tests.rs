@@ -70,6 +70,7 @@ fn make_pr_app_with_single_modified_file(file_path: &str) -> App {
                     old_lineno: Some(10),
                     new_lineno: Some(10),
                     highlighted_spans: None,
+                    intraline: Vec::new(),
                 },
                 DiffLine {
                     origin: LineOrigin::Addition,
@@ -77,6 +78,7 @@ fn make_pr_app_with_single_modified_file(file_path: &str) -> App {
                     old_lineno: None,
                     new_lineno: Some(11),
                     highlighted_spans: None,
+                    intraline: Vec::new(),
                 },
             ],
         }],

@@ -15,6 +15,7 @@ use crate::error::{Result, TuicrError};
 use crate::model::FileStatus;
 use crate::model::{DiffFile, DiffHunk, DiffLine, FilePatch, LineOrigin};
 use crate::syntax::{SyntaxHighlighter, needs_full_file_highlight};
+use crate::vcs::intraline;
 
 /// Convert backend-structured file patches into renderable diff files.
 pub fn parse_file_patches(
@@ -35,11 +36,12 @@ fn materialize_file_patch(patch: FilePatch, highlighter: &SyntaxHighlighter) -> 
     let file_path = patch.display_path().ok_or_else(|| {
         TuicrError::VcsCommand("structured diff entry has neither an old nor a new path".into())
     })?;
-    let hunks = if patch.is_binary || patch.is_too_large {
+    let mut hunks = if patch.is_binary || patch.is_too_large {
         Vec::new()
     } else {
         parse_hunks(&patch.patch, file_path, highlighter)?
     };
+    intraline::annotate_hunks(&mut hunks);
     let content_hash = DiffFile::compute_content_hash(&hunks);
 
     Ok(DiffFile {
