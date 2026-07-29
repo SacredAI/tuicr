@@ -282,7 +282,11 @@ impl App {
                     line.old_lineno = Some((n as i64 - delta) as u32);
                 }
             }
-            Ok(lines)
+            Ok(self.highlight_expanded_lines(
+                new_path.as_ref().or(old_path.as_ref()),
+                lines,
+                start,
+            ))
         };
 
         match direction {
@@ -317,6 +321,40 @@ impl App {
 
         self.rebuild_annotations();
         Ok(())
+    }
+
+    /// Syntax-highlight freshly expanded context lines.
+    ///
+    /// Expanded lines live outside the hunks, so the lazy per-hunk pass never
+    /// reaches them; they are highlighted here, once, at expansion time. The
+    /// lines are wrapped in a throwaway hunk so they go through exactly the
+    /// same path as everything else on screen.
+    fn highlight_expanded_lines(
+        &self,
+        path: Option<&PathBuf>,
+        lines: Vec<DiffLine>,
+        start: u32,
+    ) -> Vec<DiffLine> {
+        let Some(path) = path else {
+            return lines;
+        };
+        // Container grammars (Vue, Svelte, …) only highlight well from a
+        // full-file pass; a context slice would come out weaker than plain.
+        if crate::syntax::needs_full_file_highlight(path) {
+            return lines;
+        }
+        let count = lines.len() as u32;
+        let mut hunk = DiffHunk {
+            header: String::new(),
+            lines,
+            old_start: start,
+            old_count: count,
+            new_start: start,
+            new_count: count,
+            needs_highlight: false,
+        };
+        self.theme.syntax_highlighter().highlight_hunk(path, &mut hunk);
+        hunk.lines
     }
 
     /// Resolve the right `ContextProvider` for the current diff source.
