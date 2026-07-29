@@ -1,4 +1,5 @@
 pub mod app_layout;
+pub mod binary_view;
 pub mod comment_navigator;
 pub mod comment_panel;
 pub mod commit_row;

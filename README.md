@@ -15,7 +15,10 @@
 
 - GitHub-style continuous diff in the terminal. Scroll through every changed file in one stream.
 - PR-style comments at the line, range, file, and review level. 
-- Review tracking at file or hunk granularity, persisted across sessions.
+- Review tracking at file or hunk granularity, persisted across sessions. 
+- Binary files you can actually look at: changed images render old beside new using kitty, iTerm2,
+  or sixel graphics, falling back to unicode half-blocks. Other binaries get sizes, a file-type
+  guess, and a hex dump.
 - Three export targets: push a real review to GitHub, GitLab, or Bitbucket, copy structured
   markdown to your clipboard, or pipe to stdout.
 - Works with git, jj, and mercurial. Reviews uncommitted changes, commit ranges, or any GitHub PR,

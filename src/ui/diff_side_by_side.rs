@@ -282,6 +282,7 @@ pub(super) fn render_side_by_side_diff(frame: &mut Frame, app: &mut App, area: R
     // Build all diff lines for side-by-side view
     let mut lines: Vec<Line> = Vec::new();
     let mut line_idx: usize = 0;
+    let mut binary_panes = Vec::new();
 
     // Track cursor position for IME when in Comment mode
     let mut comment_cursor_logical_line: Option<usize> = None;
@@ -628,7 +629,7 @@ pub(super) fn render_side_by_side_diff(frame: &mut Frame, app: &mut App, area: R
             }
         }
 
-        if file.is_too_large || file.is_binary || file.hunks.is_empty() {
+        if file.is_too_large {
             let indicator = cursor_indicator_spaced(line_idx, ctx.current_line_idx);
             lines.push(Line::from(vec![
                 Span::styled(indicator, styles::current_line_indicator_style(&app.theme)),
@@ -636,6 +637,22 @@ pub(super) fn render_side_by_side_diff(frame: &mut Frame, app: &mut App, area: R
                     crate::ui::diff_view::binary_or_empty_label(file),
                     styles::dim_style(&app.theme),
                 ),
+            ]));
+            line_idx += 1;
+        } else if file.is_binary {
+            crate::ui::diff_view::push_binary_block(
+                app,
+                path,
+                &mut lines,
+                &mut line_idx,
+                ctx.current_line_idx,
+                &mut binary_panes,
+            );
+        } else if file.hunks.is_empty() {
+            let indicator = cursor_indicator_spaced(line_idx, ctx.current_line_idx);
+            lines.push(Line::from(vec![
+                Span::styled(indicator, styles::current_line_indicator_style(&app.theme)),
+                Span::styled("(no changes)", styles::dim_style(&app.theme)),
             ]));
             line_idx += 1;
         } else {
@@ -1022,6 +1039,14 @@ pub(super) fn render_side_by_side_diff(frame: &mut Frame, app: &mut App, area: R
 
     let diff = Paragraph::new(visible_lines).style(styles::panel_style(&app.theme));
     frame.render_widget(diff, inner);
+    crate::ui::diff_view::paint_binary_images(
+        frame,
+        app,
+        inner,
+        &binary_panes,
+        &row_heights,
+        app.diff_state.wrap_lines,
+    );
 
     paint_cursor_line_highlight(
         frame,

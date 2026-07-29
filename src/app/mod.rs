@@ -1,9 +1,12 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant, SystemTime};
 
 use chrono::Utc;
 use ratatui::style::Color;
+use ratatui_image::picker::Picker;
+use ratatui_image::protocol::Protocol;
 
 use crate::comment_vim::CommentVimEditor;
 use crate::config::{CommentTypeConfig, ExportConfig};
@@ -1349,6 +1352,18 @@ pub struct App {
     pub expanded_bottom: HashMap<GapId, Vec<DiffLine>>,
     /// Cached file line counts (keyed by file_idx) to avoid repeated disk reads
     pub file_line_count_cache: HashMap<usize, u32>,
+    /// Binary file bytes and derived facts, keyed by display path so that
+    /// re-sorting the file list does not invalidate them.
+    pub binary_content: HashMap<PathBuf, binary::BinaryFileContent>,
+    /// Decoded images per binary file side, filled by the decode thread.
+    pub binary_images: HashMap<binary::BinaryImageKey, binary::DecodedImage>,
+    /// Encoded image protocols, re-encoded only when a pane's size changes.
+    pub binary_protocols: HashMap<binary::BinaryImageKey, (ratatui::layout::Size, Protocol)>,
+    /// Receives decoded images from the background decode thread.
+    pub binary_decode_rx: Option<Receiver<(binary::BinaryImageKey, Option<image::DynamicImage>)>>,
+    /// Terminal graphics capabilities, queried once at startup. `None` when the
+    /// query failed, which disables image rendering entirely.
+    pub image_picker: Option<Picker>,
     /// Cached annotations describing what each rendered line represents
     pub line_annotations: Vec<AnnotatedLine>,
     /// Output to stdout instead of clipboard when exporting
@@ -1755,6 +1770,7 @@ impl AppStartupOptions<'_> {
 }
 
 mod annotations;
+pub mod binary;
 mod comment_vim;
 mod comments;
 mod commits;

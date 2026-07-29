@@ -741,6 +741,7 @@ impl App {
 
         self.sort_files_by_directory(false);
         self.populate_file_line_count_cache();
+        self.populate_binary_cache();
         self.expand_all_dirs();
 
         if self.diff_files.is_empty() {

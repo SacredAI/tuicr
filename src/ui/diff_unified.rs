@@ -74,6 +74,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
     // Records per-comment bar info — populated at each line-level comment
     // call site and consumed by the bar paint pass at the end of render.
     let mut comment_bars: Vec<crate::ui::diff_view::CommentBarAnchor> = Vec::new();
+    let mut binary_panes = Vec::new();
 
     let is_review_comment_mode =
         app.input_mode == InputMode::Comment && app.comment_is_review_level;
@@ -425,7 +426,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
             }
         }
 
-        if file.is_too_large || file.is_binary || file.hunks.is_empty() {
+        if file.is_too_large {
             let indicator = cursor_indicator_spaced(line_idx, current_line_idx);
             lines.push(Line::from(vec![
                 Span::styled(indicator, styles::current_line_indicator_style(&app.theme)),
@@ -433,6 +434,22 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
                     crate::ui::diff_view::binary_or_empty_label(file),
                     styles::dim_style(&app.theme),
                 ),
+            ]));
+            line_idx += 1;
+        } else if file.is_binary {
+            crate::ui::diff_view::push_binary_block(
+                app,
+                path,
+                &mut lines,
+                &mut line_idx,
+                current_line_idx,
+                &mut binary_panes,
+            );
+        } else if file.hunks.is_empty() {
+            let indicator = cursor_indicator_spaced(line_idx, current_line_idx);
+            lines.push(Line::from(vec![
+                Span::styled(indicator, styles::current_line_indicator_style(&app.theme)),
+                Span::styled("(no changes)", styles::dim_style(&app.theme)),
             ]));
             line_idx += 1;
         } else {
@@ -1293,6 +1310,14 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
     // Keep paragraph bg unset so pre-painted per-row diff backgrounds remain visible.
     let diff = Paragraph::new(visible_lines).style(Style::default().fg(app.theme.fg_primary));
     frame.render_widget(diff, inner);
+    crate::ui::diff_view::paint_binary_images(
+        frame,
+        app,
+        inner,
+        &binary_panes,
+        &row_heights,
+        app.diff_state.wrap_lines,
+    );
 
     // Cursor-line bg has to land after the paragraph: spans on +/- lines carry
     // explicit diff_add_bg/diff_del_bg that would mask a pre-paint over the code.

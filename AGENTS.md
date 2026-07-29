@@ -102,6 +102,8 @@ src/
 └── ui/
     ├── mod.rs
     ├── app_layout.rs    # Main render function, file list, diff view with inline comments
+    ├── binary_view.rs   # Binary file presentation: magic-byte file typing, hex dump,
+    │                    # image/metadata block layout (pure, unit-tested)
     ├── pr_info_panel.rs # PR description panel (status, reviewers, checks, body)
     ├── comment_navigator.rs # Sidebar comment index for jumping local/remote comments
     ├── status_bar.rs    # Header, status bar, command line rendering

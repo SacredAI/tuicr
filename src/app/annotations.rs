@@ -60,6 +60,7 @@ impl App {
         if self.file_line_count_cache.is_empty() {
             self.populate_file_line_count_cache();
         }
+        self.ensure_binary_cache();
 
         self.line_annotations.clear();
 
@@ -198,7 +199,16 @@ impl App {
                 }
             }
 
-            if file.is_binary || file.hunks.is_empty() {
+            if file.is_binary {
+                // One annotation per rendered row, matching how comment boxes
+                // span several rows: every row stays independently addressable
+                // by the cursor, scroll, and mouse math.
+                let rows = self.binary_block(file.display_path()).lines.len();
+                for _ in 0..rows {
+                    self.line_annotations
+                        .push(AnnotatedLine::BinaryOrEmpty { file_idx });
+                }
+            } else if file.hunks.is_empty() {
                 self.line_annotations
                     .push(AnnotatedLine::BinaryOrEmpty { file_idx });
             } else {

@@ -5,6 +5,9 @@ use ratatui::{
     text::{Line, Span},
 };
 
+use ratatui_image::Image as RatatuiImage;
+
+use crate::app::binary::{BINARY_BLOCK_INDENT, BinaryImageKey};
 use crate::app::{
     AnnotatedLine, App, DiffViewMode, ExpandDirection, GAP_EXPAND_BATCH, VisualSelection,
 };
@@ -161,6 +164,102 @@ pub(super) fn diff_visible_range(app: &App, inner: Rect) -> (usize, usize) {
     } else {
         let start = app.diff_state.scroll_offset;
         (start, start.saturating_add(inner.height as usize))
+    }
+}
+
+/// Where one image pane landed in the logical line stream.
+///
+/// Panes are resolved to screen rows only after the diff paragraph has been
+/// drawn, because the image widget paints over the rows the block reserved.
+pub(super) struct BinaryPaneAnchor {
+    key: BinaryImageKey,
+    /// Logical line index of the pane's first reserved row.
+    line_idx: usize,
+    column: u16,
+    width: u16,
+    height: u16,
+}
+
+/// Append a binary file's block to the line stream and record its image panes.
+///
+/// The block comes from `App::binary_block`, the same call `rebuild_annotations`
+/// makes, so the rows pushed here always match the annotations pushed there.
+pub(super) fn push_binary_block(
+    app: &App,
+    display_path: &std::path::Path,
+    lines: &mut Vec<Line<'static>>,
+    line_idx: &mut usize,
+    current_line_idx: usize,
+    anchors: &mut Vec<BinaryPaneAnchor>,
+) {
+    let block = app.binary_block(display_path);
+    let block_start = *line_idx;
+
+    for pane in block.panes {
+        anchors.push(BinaryPaneAnchor {
+            key: (display_path.to_path_buf(), pane.side),
+            line_idx: block_start + pane.row as usize,
+            column: pane.column,
+            width: pane.width,
+            height: pane.height,
+        });
+    }
+
+    for mut line in block.lines {
+        let indicator = cursor_indicator_spaced(*line_idx, current_line_idx);
+        line.spans.insert(
+            0,
+            Span::styled(indicator, styles::current_line_indicator_style(&app.theme)),
+        );
+        lines.push(line);
+        *line_idx += 1;
+    }
+}
+
+/// Paint decoded images over the rows their block reserved.
+///
+/// Runs after the diff paragraph so the image lands on top of the blank rows
+/// the block left for it.
+pub(super) fn paint_binary_images(
+    frame: &mut Frame,
+    app: &mut App,
+    inner: Rect,
+    anchors: &[BinaryPaneAnchor],
+    row_heights: &[usize],
+    wrap_lines: bool,
+) {
+    let scroll_offset = app.diff_state.scroll_offset;
+    for anchor in anchors {
+        let Some(logical_offset) = anchor.line_idx.checked_sub(scroll_offset) else {
+            continue;
+        };
+        let visual_row: usize = if wrap_lines {
+            row_heights.iter().take(logical_offset).sum()
+        } else {
+            logical_offset
+        };
+
+        let y = inner.y.saturating_add(visual_row as u16);
+        // Fit the image to whatever of its reserved block is still on screen.
+        // The protocols draw a whole image from one origin, so a pane whose
+        // first row has scrolled off cannot be drawn part-way through.
+        let height = anchor
+            .height
+            .min((inner.y + inner.height).saturating_sub(y));
+        let width = anchor.width.min(inner.width.saturating_sub(anchor.column));
+        if width == 0 || height == 0 {
+            continue;
+        }
+
+        let area = Rect {
+            x: inner.x + BINARY_BLOCK_INDENT + anchor.column,
+            y,
+            width,
+            height,
+        };
+        if let Some(protocol) = app.binary_image_protocol(&anchor.key, area.as_size()) {
+            frame.render_widget(RatatuiImage::new(protocol), area);
+        }
     }
 }
 
