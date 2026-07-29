@@ -91,6 +91,7 @@ impl App {
             is_binary: false,
             is_too_large: false,
             is_commit_message: true,
+            needs_highlight: false,
             content_hash,
         };
         self.diff_files.insert(0, commit_msg_file);

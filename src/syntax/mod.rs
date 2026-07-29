@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use std::path::Path;
 use two_face::theme::EmbeddedThemeName;
 
-use crate::model::diff_types::LineOrigin;
+use crate::model::diff_types::{DiffFile, DiffHunk, LineOrigin};
 
 /// A single line of highlighted spans (style + text pairs).
 pub(crate) type HighlightedSpans = Vec<(Style, String)>;
@@ -112,6 +112,56 @@ impl SyntaxHighlighter {
             add_bg: Color::Reset,
             del_bg: Color::Reset,
             markdown_palette,
+        }
+    }
+
+    /// Populate `highlighted_spans` for every line of every hunk in `file`.
+    ///
+    /// Container grammars are skipped: their spans come from the full-file
+    /// pass in `crate::vcs`, which would otherwise be overwritten with the
+    /// weaker per-hunk result.
+    pub(crate) fn highlight_diff_file(&self, file: &mut DiffFile) {
+        let Some(path) = file.new_path.clone().or_else(|| file.old_path.clone()) else {
+            return;
+        };
+        if needs_full_file_highlight(&path) {
+            return;
+        }
+        for hunk in &mut file.hunks {
+            self.highlight_hunk(&path, hunk);
+        }
+    }
+
+    /// Highlight one hunk. A hunk is the largest contiguous run of each side
+    /// the diff gives us, and syntect carries parse state along a run, so the
+    /// old and new sides are highlighted as whole sequences.
+    fn highlight_hunk(&self, path: &Path, hunk: &mut DiffHunk) {
+        let contents: Vec<String> = hunk.lines.iter().map(|l| l.content.clone()).collect();
+        let origins: Vec<LineOrigin> = hunk.lines.iter().map(|l| l.origin).collect();
+        let sequences = Self::split_diff_lines_for_highlighting(&contents, &origins);
+
+        // Each side is only read back for the origins that map to it, so a
+        // hunk with no deletions never needs the old side highlighted.
+        let needs_old = origins.iter().any(|o| matches!(o, LineOrigin::Deletion));
+        let needs_new = origins
+            .iter()
+            .any(|o| matches!(o, LineOrigin::Addition | LineOrigin::Context));
+
+        let old_highlighted = needs_old
+            .then(|| self.highlight_file_lines(path, &sequences.old_lines))
+            .flatten();
+        let new_highlighted = needs_new
+            .then(|| self.highlight_file_lines(path, &sequences.new_lines))
+            .flatten();
+
+        for (idx, line) in hunk.lines.iter_mut().enumerate() {
+            line.highlighted_spans = self.highlighted_line_for_diff_with_background(
+                old_highlighted.as_deref(),
+                new_highlighted.as_deref(),
+                sequences.old_line_indices[idx],
+                sequences.new_line_indices[idx],
+                line.origin,
+            );
         }
     }
 
@@ -423,6 +473,89 @@ mod tests {
                 .is_none(),
             "plain highlighter must not resolve a syntax, or the probe is not cheap"
         );
+    }
+    /// `highlight_hunk` skips the old side when a hunk has no deletions (and
+    /// the new side when it has neither additions nor context). Those spans
+    /// are supposed to be unreachable, so skipping them must produce exactly
+    /// what highlighting both sides unconditionally produces.
+    #[test]
+    fn should_match_unconditional_both_side_highlighting() {
+        use crate::model::diff_types::{DiffHunk, DiffLine};
+
+        let cases: Vec<Vec<(LineOrigin, &str)>> = vec![
+            // additions only — old side skipped
+            vec![
+                (LineOrigin::Addition, "let x = \"a\";"),
+                (LineOrigin::Addition, "let y = 2;"),
+            ],
+            // deletions only — new side skipped
+            vec![
+                (LineOrigin::Deletion, "let x = \"a\";"),
+                (LineOrigin::Deletion, "let y = 2;"),
+            ],
+            // interleaved — neither side skipped
+            vec![
+                (LineOrigin::Context, "fn main() {"),
+                (LineOrigin::Deletion, "    let old = \"gone\";"),
+                (LineOrigin::Addition, "    let new = \"here\";"),
+                (LineOrigin::Context, "}"),
+            ],
+        ];
+
+        let highlighter = SyntaxHighlighter::default();
+        let path = Path::new("case.rs");
+
+        for (case_idx, case) in cases.iter().enumerate() {
+            let make_hunk = || DiffHunk {
+                header: "@@ -1,2 +1,2 @@".to_string(),
+                lines: case
+                    .iter()
+                    .map(|(origin, content)| DiffLine {
+                        origin: *origin,
+                        content: content.to_string(),
+                        old_lineno: Some(1),
+                        new_lineno: Some(1),
+                        highlighted_spans: None,
+                    })
+                    .collect(),
+                old_start: 1,
+                old_count: 2,
+                new_start: 1,
+                new_count: 2,
+            };
+
+            let mut actual = make_hunk();
+            highlighter.highlight_hunk(path, &mut actual);
+
+            // Reference: highlight both sides unconditionally.
+            let mut expected = make_hunk();
+            let contents: Vec<String> = expected.lines.iter().map(|l| l.content.clone()).collect();
+            let origins: Vec<LineOrigin> = expected.lines.iter().map(|l| l.origin).collect();
+            let sequences =
+                SyntaxHighlighter::split_diff_lines_for_highlighting(&contents, &origins);
+            let old = highlighter.highlight_file_lines(path, &sequences.old_lines);
+            let new = highlighter.highlight_file_lines(path, &sequences.new_lines);
+            for (idx, line) in expected.lines.iter_mut().enumerate() {
+                line.highlighted_spans = highlighter.highlighted_line_for_diff_with_background(
+                    old.as_deref(),
+                    new.as_deref(),
+                    sequences.old_line_indices[idx],
+                    sequences.new_line_indices[idx],
+                    line.origin,
+                );
+            }
+
+            for (idx, (a, e)) in actual.lines.iter().zip(expected.lines.iter()).enumerate() {
+                assert_eq!(
+                    a.highlighted_spans, e.highlighted_spans,
+                    "case {case_idx} line {idx} diverged from both-side highlighting"
+                );
+                assert!(
+                    a.highlighted_spans.is_some(),
+                    "case {case_idx} line {idx} lost highlighting"
+                );
+            }
+        }
     }
 
     #[test]

@@ -115,6 +115,7 @@ fn make_file_with_hunks(path: &str, hunks: Vec<DiffHunk>) -> DiffFile {
         is_binary: false,
         is_too_large: false,
         is_commit_message: false,
+        needs_highlight: false,
         content_hash,
     }
 }
@@ -1439,6 +1440,7 @@ fn should_not_show_eof_gap_for_deleted_files() {
         is_binary: false,
         is_too_large: false,
         is_commit_message: false,
+        needs_highlight: false,
         content_hash,
     };
     let app = build_app_with_files(vec![file], 100);

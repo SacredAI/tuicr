@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{Result, TuicrError};
 use crate::model::{DiffFile, DiffHunk, DiffLine, FileStatus, LineOrigin};
-use crate::syntax::{SyntaxHighlighter, needs_full_file_highlight};
+use crate::syntax::SyntaxHighlighter;
 use crate::vcs::traits::{
     ChangeKind, DiffWhitespaceMode, ResolvedRevisionRange, RevisionDiffTarget,
 };
@@ -25,7 +25,7 @@ pub fn get_working_tree_diff(
     opts.recurse_untracked_dirs(true);
 
     let diff = repo.diff_tree_to_workdir_with_index(head.as_ref(), Some(&mut opts))?;
-    let mut files = parse_diff(&diff, highlighter)?;
+    let mut files = parse_diff(&diff)?;
     enhance_with_full_file_highlight(
         &mut files,
         highlighter,
@@ -50,7 +50,7 @@ pub fn get_staged_diff(
     let mut opts = diff_options(whitespace_mode);
 
     let diff = repo.diff_tree_to_index(head.as_ref(), Some(&index), Some(&mut opts))?;
-    let mut files = parse_diff(&diff, highlighter)?;
+    let mut files = parse_diff(&diff)?;
     enhance_with_full_file_highlight(
         &mut files,
         highlighter,
@@ -115,7 +115,7 @@ pub fn get_unstaged_diff(
     opts.recurse_untracked_dirs(true);
 
     let diff = repo.diff_index_to_workdir(Some(&index), Some(&mut opts))?;
-    let mut files = parse_diff(&diff, highlighter)?;
+    let mut files = parse_diff(&diff)?;
     enhance_with_full_file_highlight(
         &mut files,
         highlighter,
@@ -191,7 +191,7 @@ fn diff_commit_trees(
     let mut opts = diff_options(whitespace_mode);
 
     let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut opts))?;
-    let mut files = parse_diff(&diff, highlighter)?;
+    let mut files = parse_diff(&diff)?;
     enhance_with_full_file_highlight(
         &mut files,
         highlighter,
@@ -232,7 +232,7 @@ pub fn get_working_tree_with_commits_diff(
     opts.recurse_untracked_dirs(true);
 
     let diff = repo.diff_tree_to_workdir_with_index(old_tree.as_ref(), Some(&mut opts))?;
-    let mut files = parse_diff(&diff, highlighter)?;
+    let mut files = parse_diff(&diff)?;
     enhance_with_full_file_highlight(
         &mut files,
         highlighter,
@@ -272,7 +272,7 @@ fn read_path_from_index(repo: &Repository, index: &git2::Index, path: &Path) -> 
     Some(String::from_utf8_lossy(blob.content()).into_owned())
 }
 
-fn parse_diff(diff: &Diff, highlighter: &SyntaxHighlighter) -> Result<Vec<DiffFile>> {
+fn parse_diff(diff: &Diff) -> Result<Vec<DiffFile>> {
     let mut files: Vec<DiffFile> = Vec::new();
 
     // Untracked files larger than this are shown in the file list but their
@@ -301,11 +301,10 @@ fn parse_diff(diff: &Diff, highlighter: &SyntaxHighlighter) -> Result<Vec<DiffFi
         let is_too_large =
             delta.status() == Delta::Untracked && delta.new_file().size() > MAX_UNTRACKED_FILE_SIZE;
 
-        let syntax_path = new_path.as_ref().or(old_path.as_ref()).map(|p| p.as_path());
         let mut hunks = if is_binary || is_too_large {
             Vec::new()
         } else {
-            parse_hunks(diff, delta_idx, highlighter, syntax_path)?
+            parse_hunks(diff, delta_idx)?
         };
 
         let content_hash = DiffFile::compute_content_hash(&hunks);
@@ -318,6 +317,7 @@ fn parse_diff(diff: &Diff, highlighter: &SyntaxHighlighter) -> Result<Vec<DiffFi
             is_binary,
             is_too_large,
             is_commit_message: false,
+            needs_highlight: true,
             content_hash,
         });
     }
@@ -329,12 +329,7 @@ fn parse_diff(diff: &Diff, highlighter: &SyntaxHighlighter) -> Result<Vec<DiffFi
     Ok(files)
 }
 
-fn parse_hunks(
-    diff: &Diff,
-    delta_idx: usize,
-    highlighter: &SyntaxHighlighter,
-    file_path: Option<&Path>,
-) -> Result<Vec<DiffHunk>> {
+fn parse_hunks(diff: &Diff, delta_idx: usize) -> Result<Vec<DiffHunk>> {
     let mut hunks: Vec<DiffHunk> = Vec::new();
 
     let patch = git2::Patch::from_diff(diff, delta_idx)?;
@@ -371,38 +366,17 @@ fn parse_hunks(
                 line_numbers.push((line.old_lineno(), line.new_lineno()));
             }
 
-            let sequences =
-                SyntaxHighlighter::split_diff_lines_for_highlighting(&line_contents, &line_origins);
-            // Container grammars skip per-hunk highlighting; the full-file
-            // post-pass overwrites these spans anyway.
-            let (old_highlighted, new_highlighted) = match file_path {
-                Some(path) if !needs_full_file_highlight(path) => (
-                    highlighter.highlight_file_lines(path, &sequences.old_lines),
-                    highlighter.highlight_file_lines(path, &sequences.new_lines),
-                ),
-                _ => (None, None),
-            };
-
             let mut lines: Vec<DiffLine> = Vec::with_capacity(line_contents.len());
             for (idx, content) in line_contents.into_iter().enumerate() {
-                let origin = line_origins[idx];
                 let (old_lineno, new_lineno) = line_numbers[idx];
 
-                let highlighted_spans = highlighter.highlighted_line_for_diff_with_background(
-                    old_highlighted.as_deref(),
-                    new_highlighted.as_deref(),
-                    sequences.old_line_indices[idx],
-                    sequences.new_line_indices[idx],
-                    origin,
-                );
-
                 lines.push(DiffLine {
-                    origin,
+                    origin: line_origins[idx],
                     content,
                     old_lineno,
                     new_lineno,
-                    highlighted_spans,
                     intraline: Vec::new(),
+                    highlighted_spans: None,
                 });
             }
 
@@ -457,9 +431,8 @@ mod tests {
         let diff = repo
             .diff_tree_to_tree(Some(&head), Some(&head), None)
             .unwrap();
-        let highlighter = SyntaxHighlighter::default();
 
-        let result = parse_diff(&diff, &highlighter);
+        let result = parse_diff(&diff);
 
         assert!(matches!(result, Err(TuicrError::NoChanges)));
     }
@@ -585,7 +558,6 @@ mod tests {
         fs::write(temp_dir.path().join("file.txt"), "unstaged\n").expect("failed to update file");
 
         let highlighter = SyntaxHighlighter::default();
-
         let unstaged = get_unstaged_diff(&repo, DiffWhitespaceMode::Normal, &highlighter)
             .expect("unstaged diff failed");
         assert_eq!(unstaged.len(), 1);

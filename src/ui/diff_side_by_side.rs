@@ -243,6 +243,8 @@ pub(super) fn render_side_by_side_diff(frame: &mut Frame, app: &mut App, area: R
     app.diff_state.viewport_height = inner.height as usize;
     app.diff_inner_area = Some(inner);
 
+    crate::ui::diff_view::highlight_files_near_viewport(app, inner);
+
     // Reset comment input annotation offset (will be set if a comment input box is rendered)
     app.comment_input_annotation_offset = None;
 
@@ -2163,6 +2165,7 @@ mod remote_comments_side_by_side_snapshot_tests {
             is_binary: false,
             is_too_large: false,
             is_commit_message: false,
+            needs_highlight: false,
             content_hash,
         }
     }
@@ -2393,6 +2396,7 @@ mod remote_comments_side_by_side_snapshot_tests {
             is_binary: false,
             is_too_large: false,
             is_commit_message: false,
+            needs_highlight: false,
             content_hash,
         }
     }
@@ -2422,6 +2426,7 @@ mod remote_comments_side_by_side_snapshot_tests {
             is_binary: false,
             is_too_large: false,
             is_commit_message: false,
+            needs_highlight: false,
             content_hash,
         }
     }
@@ -2591,6 +2596,7 @@ mod remote_comments_side_by_side_snapshot_tests {
             is_binary: false,
             is_too_large: false,
             is_commit_message: true,
+            needs_highlight: false,
             content_hash,
         }
     }

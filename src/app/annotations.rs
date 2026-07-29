@@ -1,6 +1,41 @@
 use super::*;
 
 impl App {
+    /// Syntax-highlight every diff file with an annotation in the logical line
+    /// range `[start, end)` that a VCS backend left unhighlighted.
+    ///
+    /// Syntect costs tens of microseconds per line, so highlighting a few
+    /// hundred changed files up front stalls startup for seconds. Backends
+    /// hand over unhighlighted files and each one is highlighted the first
+    /// time it scrolls into view instead.
+    pub(crate) fn highlight_files_in_range(&mut self, start: usize, end: usize) {
+        let end = end.min(self.line_annotations.len());
+        if start >= end {
+            return;
+        }
+
+        let mut pending: Vec<usize> = self.line_annotations[start..end]
+            .iter()
+            .filter_map(annotation_file_idx)
+            .filter(|idx| {
+                self.diff_files
+                    .get(*idx)
+                    .is_some_and(|file| file.needs_highlight)
+            })
+            .collect();
+        pending.dedup();
+        if pending.is_empty() {
+            return;
+        }
+
+        let highlighter = self.theme.syntax_highlighter();
+        for idx in pending {
+            let file = &mut self.diff_files[idx];
+            highlighter.highlight_diff_file(file);
+            file.needs_highlight = false;
+        }
+    }
+
     /// Ensure the file line count cache is populated for a given file.
     pub(in crate::app) fn ensure_file_line_count_cached(&mut self, file_idx: usize) {
         if !self.eof_gap_enabled() || self.file_line_count_cache.contains_key(&file_idx) {

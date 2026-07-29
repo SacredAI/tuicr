@@ -35,8 +35,7 @@ impl App {
         if let Some(file_path) = options.file_path {
             let vcs = Box::new(FileBackend::new(file_path)?);
             let vcs_info = vcs.info().clone();
-            let highlighter = theme.syntax_highlighter();
-            let diff_files = vcs.get_working_tree_diff(highlighter)?;
+            let diff_files = vcs.get_working_tree_diff(theme.syntax_highlighter())?;
             let session = Self::load_or_create_session(&vcs_info, SessionDiffSource::WorkingTree);
 
             let mut app = Self::build(
@@ -86,8 +85,7 @@ impl App {
             let vcs = Box::new(FileBackend::new_pristine(paths, cwd.clone())?);
             let mut vcs_info = vcs.info().clone();
             vcs_info.head_commit = base_commit;
-            let highlighter = theme.syntax_highlighter();
-            let diff_files = vcs.get_working_tree_diff(highlighter)?;
+            let diff_files = vcs.get_working_tree_diff(theme.syntax_highlighter())?;
             // `git ls-files` already honors `.gitignore`, but `.tuicrignore`
             // is tuicr-specific and not known to git. Run the same post-VCS
             // filter every other mode uses so users can elide tracked-but-
@@ -902,12 +900,10 @@ impl App {
             display_options.show_checks,
             display_options.show_comments,
         );
-        let highlighter = theme.syntax_highlighter();
         let opened = open_pull_request(
             backend.as_ref(),
             parsed,
             local_checkout_for_target.as_deref(),
-            highlighter,
         )?;
         let opened = Self::opened_pr_with_persisted_session(opened)?;
 
