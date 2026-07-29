@@ -161,6 +161,7 @@ fn build_fixture(files: usize, hunks_per_file: usize, lines_per_hunk: usize) -> 
                     old_lineno,
                     new_lineno,
                     highlighted_spans,
+                    intraline: Vec::new(),
                 });
             }
 
