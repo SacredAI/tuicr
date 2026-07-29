@@ -51,7 +51,7 @@ comment_types = [
 
 [forge]
 comment_type_prefix = true
-merge_method = "squash"
+merge_method = "rebase"
 ```
 
 ## Options
@@ -205,13 +205,13 @@ Settings under the `[forge]` section control how tuicr submits reviews to GitHub
 ```toml
 [forge]
 comment_type_prefix = false
-merge_method = "squash"
+merge_method = "rebase"
 ```
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `comment_type_prefix` | `true` | Prepend `[TYPE] ` to comment bodies on submit (e.g. `[ISSUE] Magic number should be a constant`). Set to `false` to send the raw comment body without a classification tag. |
-| `merge_method` | `squash` | How "Approve & Merge" in the `:submit` picker merges: `squash`, `merge`, or `rebase`. The confirmation modal names the method before you commit to it. |
+| `merge_method` | `rebase` | How "Approve & Merge" in the `:submit` picker merges: `squash`, `merge`, or `rebase`. The confirmation modal names the method before you commit to it. |
 
 ### Approve & Merge
 
