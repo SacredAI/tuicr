@@ -226,6 +226,13 @@ mod tests {
         ) -> Result<crate::forge::traits::GhCreateReviewResponse> {
             unimplemented!()
         }
+        fn merge_pull_request(
+            &self,
+            _pr: &PullRequestDetails,
+            _method: crate::config::MergeMethod,
+        ) -> Result<crate::forge::submit::MergeOutcome> {
+            unimplemented!()
+        }
     }
 
     fn repo() -> ForgeRepository {

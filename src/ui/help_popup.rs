@@ -816,7 +816,7 @@ pub fn render_help(frame: &mut Frame, app: &mut App) {
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw(
-                "Pick a review event from a menu (Comment / Approve / Request changes / Draft)",
+                "Pick a review event from a menu (Comment / Approve / Approve & Merge / Request changes / Draft)",
             ),
         ]),
         Line::from(vec![

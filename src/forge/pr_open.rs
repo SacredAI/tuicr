@@ -262,6 +262,13 @@ mod tests {
         ) -> Result<crate::forge::traits::GhCreateReviewResponse> {
             unimplemented!()
         }
+        fn merge_pull_request(
+            &self,
+            _pr: &PullRequestDetails,
+            _method: crate::config::MergeMethod,
+        ) -> Result<crate::forge::submit::MergeOutcome> {
+            unimplemented!()
+        }
     }
 
     const SIMPLE_PATCH: &str = r##"diff --git a/src/lib.rs b/src/lib.rs

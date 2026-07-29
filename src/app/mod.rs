@@ -759,19 +759,48 @@ pub struct SubmitState {
     /// instead of routing through `SubmitConfirm`. Set by the action-picker
     /// path; left `false` for explicit `:submit <event>` invocations.
     pub skip_confirm: bool,
+    /// Merge the PR after the review lands. Only the "Approve & Merge" picker
+    /// row sets this; the review half is an ordinary `Approve`.
+    pub and_merge: bool,
 }
 
-/// Event options shown in the bare-`:submit` action picker, in display
-/// order. Each row pairs the user-facing label with the `SubmitEvent` it
-/// dispatches.
-pub const SUBMIT_PICKER_EVENTS: &[(&str, crate::forge::submit::SubmitEvent)] = &[
-    ("Comment", crate::forge::submit::SubmitEvent::Comment),
-    ("Approve", crate::forge::submit::SubmitEvent::Approve),
-    (
-        "Request changes",
-        crate::forge::submit::SubmitEvent::RequestChanges,
-    ),
-    ("Draft", crate::forge::submit::SubmitEvent::Draft),
+/// One row of the bare-`:submit` action picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SubmitPickerEntry {
+    pub label: &'static str,
+    pub event: crate::forge::submit::SubmitEvent,
+    pub and_merge: bool,
+}
+
+/// Options shown in the bare-`:submit` action picker, in display order.
+/// `App::submit_picker_entries` filters this down to what the open PR
+/// actually allows.
+pub const SUBMIT_PICKER_EVENTS: &[SubmitPickerEntry] = &[
+    SubmitPickerEntry {
+        label: "Comment",
+        event: crate::forge::submit::SubmitEvent::Comment,
+        and_merge: false,
+    },
+    SubmitPickerEntry {
+        label: "Approve",
+        event: crate::forge::submit::SubmitEvent::Approve,
+        and_merge: false,
+    },
+    SubmitPickerEntry {
+        label: "Approve & Merge",
+        event: crate::forge::submit::SubmitEvent::Approve,
+        and_merge: true,
+    },
+    SubmitPickerEntry {
+        label: "Request changes",
+        event: crate::forge::submit::SubmitEvent::RequestChanges,
+        and_merge: false,
+    },
+    SubmitPickerEntry {
+        label: "Draft",
+        event: crate::forge::submit::SubmitEvent::Draft,
+        and_merge: false,
+    },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -950,6 +979,8 @@ pub struct DiffWatchReload {
 #[derive(Debug, Clone)]
 pub struct SubmitInFlightState {
     pub event: crate::forge::submit::SubmitEvent,
+    /// Merge the PR once the review lands. See `SubmitState::and_merge`.
+    pub and_merge: bool,
     /// The mappable inline comments that were sent in the payload. Each
     /// carries the source `Comment.id` so we can locate it post-success.
     pub mappable: Vec<crate::forge::submit::InlineComment>,
@@ -973,6 +1004,17 @@ pub struct SubmitInFlightState {
     pub started_at: Instant,
 }
 
+/// What the submit background thread accomplished. The merge half is
+/// separate from the review half because a merge can fail after the review
+/// has already been published — the comments are gone from local drafts
+/// either way, so the user must see both facts.
+#[derive(Debug)]
+pub struct PrSubmitResult {
+    pub review: crate::forge::traits::GhCreateReviewResponse,
+    /// `None` when no merge was asked for.
+    pub merge: Option<std::result::Result<crate::forge::submit::MergeOutcome, String>>,
+}
+
 /// Result delivered from the create-review background thread.
 #[derive(Debug)]
 pub enum PrSubmitEvent {
@@ -980,7 +1022,7 @@ pub enum PrSubmitEvent {
         repository: crate::forge::traits::ForgeRepository,
         pr_number: u64,
         head_sha: String,
-        result: std::result::Result<crate::forge::traits::GhCreateReviewResponse, String>,
+        result: std::result::Result<PrSubmitResult, String>,
     },
 }
 

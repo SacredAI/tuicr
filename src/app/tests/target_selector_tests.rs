@@ -434,6 +434,13 @@ impl crate::forge::traits::ForgeBackend for FakeForgeBackend {
     ) -> Result<crate::forge::traits::GhCreateReviewResponse> {
         unimplemented!("FakeForgeBackend does not implement create_review")
     }
+    fn merge_pull_request(
+        &self,
+        _pr: &crate::forge::traits::PullRequestDetails,
+        _method: crate::config::MergeMethod,
+    ) -> Result<crate::forge::submit::MergeOutcome> {
+        unimplemented!("FakeForgeBackend does not implement merge_pull_request")
+    }
 }
 
 fn sample_pr(number: u64, title: &str) -> PullRequestSummary {
@@ -2029,6 +2036,13 @@ impl crate::forge::traits::ForgeBackend for FailingForgeBackend {
     ) -> Result<crate::forge::traits::GhCreateReviewResponse> {
         unimplemented!()
     }
+    fn merge_pull_request(
+        &self,
+        _pr: &crate::forge::traits::PullRequestDetails,
+        _method: crate::config::MergeMethod,
+    ) -> Result<crate::forge::submit::MergeOutcome> {
+        unimplemented!()
+    }
 }
 
 #[test]
@@ -2599,6 +2613,13 @@ impl crate::forge::traits::ForgeBackend for ThreadAwareForgeBackend {
         _pr: &crate::forge::traits::PullRequestDetails,
         _request: crate::forge::traits::CreateReviewRequest<'_>,
     ) -> Result<crate::forge::traits::GhCreateReviewResponse> {
+        unimplemented!()
+    }
+    fn merge_pull_request(
+        &self,
+        _pr: &crate::forge::traits::PullRequestDetails,
+        _method: crate::config::MergeMethod,
+    ) -> Result<crate::forge::submit::MergeOutcome> {
         unimplemented!()
     }
 }

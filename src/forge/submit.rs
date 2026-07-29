@@ -50,6 +50,89 @@ impl SubmitEvent {
     }
 }
 
+/// What became of a pull request after `ForgeBackend::merge_pull_request`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeOutcome {
+    /// The forge merged the pull request there and then.
+    Merged,
+    /// Required checks had not finished, so the forge was told to merge once
+    /// they pass (`gh pr merge --auto`, `glab mr merge --when-pipeline-succeeds`).
+    AutoMergeArmed,
+}
+
+impl MergeOutcome {
+    pub fn human_label(self) -> &'static str {
+        match self {
+            MergeOutcome::Merged => "merged",
+            MergeOutcome::AutoMergeArmed => "auto-merge armed",
+        }
+    }
+}
+
+/// Why a forge refused to merge, recovered from the CLI's stderr.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeFailureKind {
+    /// The merge is only blocked by unfinished checks — the forge can wait
+    /// for them instead, so backends retry in auto-merge mode.
+    NotMergeableYet,
+    Conflict,
+    BranchProtection,
+    Other,
+}
+
+/// Classify a `gh pr merge` / `glab mr merge` failure. Both CLIs pass the
+/// forge's own wording through, so one matcher covers both.
+pub fn classify_merge_failure(stderr: &str) -> MergeFailureKind {
+    let lower = stderr.to_ascii_lowercase();
+    if lower.contains("conflict") || lower.contains("cannot be cleanly created") {
+        return MergeFailureKind::Conflict;
+    }
+    // `gh` names `--auto` precisely when waiting is the remedy; GitLab says
+    // the pipeline has not succeeded.
+    if lower.contains("--auto")
+        || lower.contains("checks are pending")
+        || lower.contains("still running")
+        || lower.contains("pipeline")
+    {
+        return MergeFailureKind::NotMergeableYet;
+    }
+    if lower.contains("protected branch")
+        || lower.contains("branch policy")
+        || lower.contains("review required")
+        || lower.contains("changes requested")
+        || lower.contains("approv")
+        || lower.contains("not allowed to merge")
+    {
+        return MergeFailureKind::BranchProtection;
+    }
+    MergeFailureKind::Other
+}
+
+/// Human-readable merge failure text. `forge` is the display name ("GitHub"
+/// or "GitLab"); `detail` is the raw CLI stderr, used only when nothing more
+/// specific is known.
+pub fn merge_failure_message(kind: MergeFailureKind, forge: &str, detail: &str) -> String {
+    match kind {
+        MergeFailureKind::Conflict => {
+            format!("{forge} cannot merge: the branch conflicts with its target.")
+        }
+        MergeFailureKind::BranchProtection => {
+            format!("{forge} cannot merge: branch protection rules are not satisfied.")
+        }
+        MergeFailureKind::NotMergeableYet => {
+            format!("{forge} cannot merge yet and could not wait for the pending checks.")
+        }
+        MergeFailureKind::Other => {
+            let detail = detail.trim();
+            if detail.is_empty() {
+                format!("{forge} merge failed.")
+            } else {
+                format!("{forge} merge failed: {detail}")
+            }
+        }
+    }
+}
+
 /// GitHub's per-comment `side` field. Maps 1:1 to `LineSide`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GhSide {
@@ -578,6 +661,29 @@ mod tests {
     use crate::model::diff_types::{DiffHunk, DiffLine, FileStatus, LineOrigin};
     use std::path::PathBuf;
 
+    #[test]
+    fn should_tell_an_unsatisfied_branch_rule_apart_from_a_wait() {
+        // The distinction decides whether the backend arms auto-merge or
+        // gives up, so it must not collapse into one bucket.
+        for (stderr, expected) in [
+            (
+                "Pull request is not mergeable: 2 of 2 required approving reviews are missing",
+                MergeFailureKind::BranchProtection,
+            ),
+            (
+                "the base branch policy prohibits the merge; add the `--auto` flag",
+                MergeFailureKind::NotMergeableYet,
+            ),
+            (
+                "the merge commit cannot be cleanly created",
+                MergeFailureKind::Conflict,
+            ),
+            ("something else went wrong", MergeFailureKind::Other),
+        ] {
+            assert_eq!(classify_merge_failure(stderr), expected, "for {stderr:?}");
+        }
+    }
+
     fn line(origin: LineOrigin, new: Option<u32>, old: Option<u32>) -> DiffLine {
         DiffLine {
             origin,
@@ -1026,6 +1132,7 @@ mod tests {
         let comment = comment_with_line(LineSide::New, Some(11), None);
         let cfg = ForgeConfig {
             comment_type_prefix: false,
+            ..ForgeConfig::default()
         };
         let mapped = map_comment(&comment, anchor_from(&comment), &typical_file(), &cfg);
         match mapped {
@@ -1084,6 +1191,7 @@ mod tests {
     fn should_omit_type_prefix_in_body_when_disabled() {
         let cfg = ForgeConfig {
             comment_type_prefix: false,
+            ..ForgeConfig::default()
         };
         let comments = vec![note("just text")];
         let body = build_review_body(&comments, &[], &cfg);

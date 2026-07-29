@@ -17,6 +17,44 @@ pub struct CommentTypeConfig {
     pub color: Option<String>,
 }
 
+/// How the submit flow's "Approve & Merge" action merges a pull request.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeMethod {
+    #[default]
+    Squash,
+    Merge,
+    Rebase,
+}
+
+impl MergeMethod {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "squash" => Some(Self::Squash),
+            "merge" => Some(Self::Merge),
+            "rebase" => Some(Self::Rebase),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Squash => "squash",
+            Self::Merge => "merge",
+            Self::Rebase => "rebase",
+        }
+    }
+
+    /// Label for the submit confirmation modal.
+    pub fn human_label(self) -> &'static str {
+        match self {
+            Self::Squash => "Squash and merge",
+            Self::Merge => "Merge commit",
+            Self::Rebase => "Rebase and merge",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ForgeConfig {
@@ -24,12 +62,15 @@ pub struct ForgeConfig {
     /// reader can see the comment classification at a glance. Defaults to
     /// `true`; set to `false` to send the raw comment body.
     pub comment_type_prefix: bool,
+    /// Method used by "Approve & Merge" in the `:submit` picker.
+    pub merge_method: MergeMethod,
 }
 
 impl Default for ForgeConfig {
     fn default() -> Self {
         Self {
             comment_type_prefix: true,
+            merge_method: MergeMethod::default(),
         }
     }
 }
@@ -216,7 +257,7 @@ const KNOWN_KEYS: &[&str] = &[
     "export",
 ];
 
-const FORGE_KNOWN_KEYS: &[&str] = &["comment_type_prefix"];
+const FORGE_KNOWN_KEYS: &[&str] = &["comment_type_prefix", "merge_method"];
 
 const EXPORT_KNOWN_KEYS: &[&str] = &[
     "intro",
@@ -498,6 +539,11 @@ fn parse_forge(value: &Value, warnings: &mut Vec<String>) -> Option<ForgeConfig>
         any_override = true;
     }
 
+    if let Some(v) = read_forge_merge_method(table, warnings) {
+        cfg.merge_method = v;
+        any_override = true;
+    }
+
     if any_override { Some(cfg) } else { None }
 }
 
@@ -573,6 +619,20 @@ fn read_section_string(
             "Warning: Config key '{section}.{key}' must be a string; ignoring value"
         ));
         None
+    }
+}
+
+fn read_forge_merge_method(table: &toml::Table, warnings: &mut Vec<String>) -> Option<MergeMethod> {
+    let val = table.get("merge_method")?;
+    match val.as_str().and_then(MergeMethod::parse) {
+        Some(method) => Some(method),
+        None => {
+            warnings.push(
+                "Warning: Config key 'forge.merge_method' must be \"squash\", \"merge\", or \"rebase\"; ignoring value"
+                    .to_string(),
+            );
+            None
+        }
     }
 }
 
@@ -1549,6 +1609,35 @@ comment_type_prefix = false
             .expect("forge section should parse");
         assert!(!forge.comment_type_prefix);
         assert!(outcome.warnings.is_empty());
+    }
+
+    #[test]
+    fn should_read_merge_method_and_reject_an_unknown_one() {
+        let outcome = parse_config("[forge]\nmerge_method = \"rebase\"\n");
+        let forge = outcome
+            .config
+            .as_ref()
+            .and_then(|cfg| cfg.forge.clone())
+            .expect("forge section should parse");
+        assert_eq!(forge.merge_method, MergeMethod::Rebase);
+        assert!(outcome.warnings.is_empty());
+
+        // An unrecognized method falls back to the default rather than
+        // sending an invalid flag to the forge CLI.
+        let outcome = parse_config("[forge]\nmerge_method = \"fast-forward\"\n");
+        assert!(
+            outcome
+                .config
+                .as_ref()
+                .and_then(|cfg| cfg.forge.clone())
+                .is_none()
+        );
+        assert_eq!(outcome.warnings.len(), 1);
+        assert!(
+            outcome.warnings[0].contains("forge.merge_method"),
+            "got {:?}",
+            outcome.warnings[0]
+        );
     }
 
     #[test]

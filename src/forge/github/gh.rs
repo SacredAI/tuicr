@@ -2,8 +2,12 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::config::MergeMethod;
 use crate::error::{Result, TuicrError};
 use crate::forge::remote_comments::{RemoteReviewSummary, RemoteReviewThread};
+use crate::forge::submit::{
+    MergeFailureKind, MergeOutcome, classify_merge_failure, merge_failure_message,
+};
 use crate::forge::traits::{
     ForgeBackend, ForgeFileLinesRequest, ForgeRepository, GhCreateReviewResponse,
     PagedPullRequests, PullRequestCommit, PullRequestDetails, PullRequestInfo,
@@ -586,6 +590,53 @@ where
 
         parse_create_review_response(&output)
     }
+
+    fn merge_pull_request(
+        &self,
+        pr: &PullRequestDetails,
+        method: MergeMethod,
+    ) -> Result<MergeOutcome> {
+        let direct = match self.runner.run(&build_merge_args(pr, method, false)) {
+            Ok(_) => return Ok(MergeOutcome::Merged),
+            Err(err) => err,
+        };
+
+        let pending_checks = matches!(
+            &direct,
+            GhCommandError::Failed { stderr, .. }
+                if classify_merge_failure(stderr) == MergeFailureKind::NotMergeableYet
+        );
+        if !pending_checks {
+            return Err(map_merge_error(direct, &pr.repository.host));
+        }
+
+        self.runner
+            .run(&build_merge_args(pr, method, true))
+            .map(|_| MergeOutcome::AutoMergeArmed)
+            .map_err(|err| map_merge_error(err, &pr.repository.host))
+    }
+}
+
+/// `gh pr merge` invocation for one method. `auto` adds `--auto`, which tells
+/// GitHub to merge once every required check passes instead of refusing now.
+fn build_merge_args(pr: &PullRequestDetails, method: MergeMethod, auto: bool) -> Vec<String> {
+    let method_flag = match method {
+        MergeMethod::Squash => "--squash",
+        MergeMethod::Merge => "--merge",
+        MergeMethod::Rebase => "--rebase",
+    };
+    let mut args = vec![
+        "pr".to_string(),
+        "merge".to_string(),
+        pr.number.to_string(),
+        "--repo".to_string(),
+        gh_repo_arg(&pr.repository),
+        method_flag.to_string(),
+    ];
+    if auto {
+        args.push("--auto".to_string());
+    }
+    args
 }
 
 impl<R> GitHubGhBackend<R>
@@ -1003,6 +1054,16 @@ fn map_create_review_error(error: GhCommandError, host: &str) -> TuicrError {
                 "GitHub rejected the review: the selected commit is not part of this PR (it may have been removed by a force-push). Reload with :e and try again."
                     .to_string(),
             );
+        }
+    }
+    map_gh_error(error, host)
+}
+
+fn map_merge_error(error: GhCommandError, host: &str) -> TuicrError {
+    if let GhCommandError::Failed { stderr, .. } = &error {
+        let kind = classify_merge_failure(stderr);
+        if kind != MergeFailureKind::Other {
+            return TuicrError::Forge(merge_failure_message(kind, "GitHub", stderr));
         }
     }
     map_gh_error(error, host)
@@ -2346,5 +2407,132 @@ Match host github-work
             "expected unknown-commit hint, got: {msg:?}"
         );
         assert!(msg.contains(":e"), "got: {msg:?}");
+    }
+
+    /// Runner for the merge path: records every invocation and replays a
+    /// scripted result per call, so a test can make the first `gh pr merge`
+    /// fail and the `--auto` retry succeed.
+    struct MergeRunner {
+        calls: Mutex<Vec<Vec<String>>>,
+        results: Mutex<std::collections::VecDeque<GhCommandResult<String>>>,
+    }
+
+    impl MergeRunner {
+        fn new(results: Vec<GhCommandResult<String>>) -> Self {
+            Self {
+                calls: Mutex::new(Vec::new()),
+                results: Mutex::new(results.into()),
+            }
+        }
+
+        fn calls(&self) -> Vec<Vec<String>> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl GhCommandRunner for MergeRunner {
+        fn run(&self, args: &[String]) -> GhCommandResult<String> {
+            self.calls.lock().unwrap().push(args.to_vec());
+            self.results
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| Ok(String::new()))
+        }
+    }
+
+    fn merge_details() -> PullRequestDetails {
+        PullRequestDetails {
+            repository: repo(),
+            number: 125,
+            title: "test".to_string(),
+            url: "https://github.com/agavra/tuicr/pull/125".to_string(),
+            state: "OPEN".to_string(),
+            is_draft: false,
+            author: None,
+            head_ref_name: "feat".to_string(),
+            base_ref_name: "main".to_string(),
+            head_sha: "abc".to_string(),
+            base_sha: "def".to_string(),
+            body: String::new(),
+            updated_at: None,
+            closed: false,
+            merged_at: None,
+            diff_start_sha: None,
+        }
+    }
+
+    #[test]
+    fn should_pass_the_configured_method_flag_to_gh_pr_merge() {
+        for (method, flag) in [
+            (MergeMethod::Squash, "--squash"),
+            (MergeMethod::Merge, "--merge"),
+            (MergeMethod::Rebase, "--rebase"),
+        ] {
+            let runner = MergeRunner::new(vec![Ok(String::new())]);
+            let backend = GitHubGhBackend::with_runner(Some(repo()), runner);
+
+            let outcome = backend
+                .merge_pull_request(&merge_details(), method)
+                .unwrap();
+
+            assert_eq!(outcome, MergeOutcome::Merged);
+            let calls = backend.runner.calls();
+            assert_eq!(calls.len(), 1, "{method:?} should merge in one call");
+            assert_eq!(
+                calls[0],
+                vec![
+                    "pr".to_string(),
+                    "merge".to_string(),
+                    "125".to_string(),
+                    "--repo".to_string(),
+                    "agavra/tuicr".to_string(),
+                    flag.to_string(),
+                ],
+            );
+        }
+    }
+
+    #[test]
+    fn should_arm_auto_merge_when_required_checks_have_not_finished() {
+        // gh refuses and points at `--auto` when the only thing missing is
+        // time; the backend takes the hint rather than surfacing a failure.
+        let runner = MergeRunner::new(vec![
+            Err(GhCommandError::Failed {
+                status: Some(1),
+                stderr: "Pull request #125 is not mergeable: the base branch policy prohibits the merge.\nTo have the pull request merged after all the requirements have been met, add the `--auto` flag.".to_string(),
+            }),
+            Ok(String::new()),
+        ]);
+        let backend = GitHubGhBackend::with_runner(Some(repo()), runner);
+
+        let outcome = backend
+            .merge_pull_request(&merge_details(), MergeMethod::Squash)
+            .unwrap();
+
+        assert_eq!(outcome, MergeOutcome::AutoMergeArmed);
+        let calls = backend.runner.calls();
+        assert_eq!(calls.len(), 2);
+        assert!(!calls[0].contains(&"--auto".to_string()));
+        assert!(calls[1].contains(&"--auto".to_string()));
+    }
+
+    #[test]
+    fn should_report_a_merge_conflict_without_retrying() {
+        let runner = MergeRunner::new(vec![Err(GhCommandError::Failed {
+            status: Some(1),
+            stderr:
+                "Pull request #125 is not mergeable: the merge commit cannot be cleanly created."
+                    .to_string(),
+        })]);
+        let backend = GitHubGhBackend::with_runner(Some(repo()), runner);
+
+        let err = backend
+            .merge_pull_request(&merge_details(), MergeMethod::Squash)
+            .unwrap_err();
+
+        assert_eq!(backend.runner.calls().len(), 1, "conflicts are not retried");
+        let msg = err.to_string();
+        assert!(msg.contains("conflicts"), "got: {msg:?}");
     }
 }

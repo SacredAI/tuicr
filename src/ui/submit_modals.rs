@@ -9,7 +9,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
-use crate::app::{App, SUBMIT_PICKER_EVENTS};
+use crate::app::App;
 use crate::forge::submit::{ResolverAction, SubmitEvent, UnmappableItem};
 use crate::ui::styles;
 
@@ -30,9 +30,11 @@ pub fn render_submit_action_picker(frame: &mut Frame, app: &App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    let entries = app.submit_picker_entries();
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
-    for (i, (label, _)) in SUBMIT_PICKER_EVENTS.iter().enumerate() {
+    for (i, entry) in entries.iter().enumerate() {
+        let label = entry.label;
         let style = if i == app.submit_picker_cursor {
             Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
         } else {
@@ -133,6 +135,7 @@ pub fn render_submit_confirm(frame: &mut Frame, app: &App) {
     let forge = app.forge_display_name();
     let title = match state.event {
         SubmitEvent::Draft => format!(" Push pending {forge} review? "),
+        _ if state.and_merge => format!(" Approve and merge on {forge}? "),
         _ => format!(" Submit review to {forge}? "),
     };
 
@@ -170,6 +173,12 @@ pub fn render_submit_confirm(frame: &mut Frame, app: &App) {
         "Head: {sha}",
         sha = short_sha(&state.commit_id)
     )));
+    if state.and_merge {
+        lines.push(Line::from(format!(
+            "Then merge: {method}",
+            method = app.forge_config.merge_method.human_label()
+        )));
+    }
 
     let stale = app.submit_head_is_stale();
     if stale {
@@ -187,10 +196,17 @@ pub fn render_submit_confirm(frame: &mut Frame, app: &App) {
             "Warning: this review targets an older PR revision.",
             Style::default().fg(theme.pending),
         )));
-        lines.push(Line::from(Span::styled(
-            format!("Some comments may appear outdated on {forge}."),
-            Style::default().fg(theme.pending),
-        )));
+        if state.and_merge {
+            lines.push(Line::from(Span::styled(
+                "Reload with [r] before merging — you have not read the current head.",
+                Style::default().fg(theme.pending),
+            )));
+        } else {
+            lines.push(Line::from(Span::styled(
+                format!("Some comments may appear outdated on {forge}."),
+                Style::default().fg(theme.pending),
+            )));
+        }
     }
 
     if matches!(state.event, SubmitEvent::Draft) {
@@ -206,7 +222,11 @@ pub fn render_submit_confirm(frame: &mut Frame, app: &App) {
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(prompt_spans(stale, state.event)));
+    lines.push(Line::from(prompt_spans(
+        stale,
+        state.event,
+        state.and_merge,
+    )));
 
     let paragraph = Paragraph::new(lines)
         .style(styles::popup_style(theme))
@@ -245,17 +265,26 @@ fn short_sha(sha: &str) -> String {
     sha.chars().take(7).collect()
 }
 
-fn prompt_spans(stale: bool, event: SubmitEvent) -> Vec<Span<'static>> {
+fn prompt_spans(stale: bool, event: SubmitEvent, and_merge: bool) -> Vec<Span<'static>> {
     let primary = match event {
+        _ if and_merge => "approve & merge",
         SubmitEvent::Draft => "push draft",
         _ => "submit",
     };
-    let mut spans = vec![
-        Span::styled("[y] ", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(format!("{primary}    ")),
-        Span::styled("[n] ", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw("cancel"),
-    ];
+    // A stale head blocks the merge variant, so `[y]` is not on offer.
+    let mut spans = if stale && and_merge {
+        Vec::new()
+    } else {
+        vec![
+            Span::styled("[y] ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(format!("{primary}    ")),
+        ]
+    };
+    spans.push(Span::styled(
+        "[n] ",
+        Style::default().add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::raw("cancel"));
     if stale {
         spans.push(Span::raw("    "));
         spans.push(Span::styled(
@@ -473,7 +502,7 @@ mod tests {
     #[test]
     fn picker_cursor_moves_with_marker() {
         let mut app = make_pr_app();
-        app.submit_picker_cursor = 2;
+        app.submit_picker_cursor = 3;
         let buffer = draw_picker(&app);
         let text = buffer_text(&buffer);
         assert!(text.contains("> Request changes"));
@@ -485,6 +514,7 @@ mod tests {
         use crate::forge::submit::UnmappableReason;
         let mut app = make_pr_app();
         app.submit_state = Some(SubmitState {
+            and_merge: false,
             event: SubmitEvent::Comment,
             mappable: Vec::new(),
             unmappable: vec![
@@ -524,6 +554,7 @@ mod tests {
         use crate::forge::submit::UnmappableReason;
         let mut app = make_pr_app();
         app.submit_state = Some(SubmitState {
+            and_merge: false,
             event: SubmitEvent::Comment,
             mappable: Vec::new(),
             unmappable: vec![unmappable_item(
@@ -546,6 +577,7 @@ mod tests {
     fn confirm_renders_event_and_counts_for_comment_submission() {
         let mut app = make_pr_app();
         app.submit_state = Some(SubmitState {
+            and_merge: false,
             event: SubmitEvent::Comment,
             mappable: vec![inline(11), inline(12)],
             unmappable: Vec::new(),
@@ -571,6 +603,7 @@ mod tests {
         let mut app = make_pr_app();
         app.current_pr_head = Some("ffff5678".to_string());
         app.submit_state = Some(SubmitState {
+            and_merge: false,
             event: SubmitEvent::RequestChanges,
             mappable: vec![inline(11)],
             unmappable: Vec::new(),
@@ -591,6 +624,7 @@ mod tests {
     fn confirm_shows_pending_review_title_and_no_event_line_for_draft() {
         let mut app = make_pr_app();
         app.submit_state = Some(SubmitState {
+            and_merge: false,
             event: SubmitEvent::Draft,
             mappable: vec![inline(11)],
             unmappable: Vec::new(),
@@ -612,6 +646,7 @@ mod tests {
     fn confirm_uses_gitlab_label_for_gitlab_draft() {
         let mut app = make_pr_app_for(ForgeRepository::gitlab("gitlab.com", "owner", "repo"));
         app.submit_state = Some(SubmitState {
+            and_merge: false,
             event: SubmitEvent::Draft,
             mappable: vec![inline(11)],
             unmappable: Vec::new(),
@@ -635,6 +670,7 @@ mod tests {
         use crate::forge::submit::UnmappableReason;
         let mut app = make_pr_app();
         app.submit_state = Some(SubmitState {
+            and_merge: false,
             event: SubmitEvent::Comment,
             mappable: vec![inline(11)],
             unmappable: vec![

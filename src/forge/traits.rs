@@ -2,9 +2,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::config::MergeMethod;
 use crate::error::Result;
 use crate::forge::remote_comments::RemoteReviewThread;
-use crate::forge::submit::SubmitEvent;
+use crate::forge::submit::{MergeOutcome, SubmitEvent};
 use crate::model::{DiffLine, FilePatch, FileStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -555,6 +556,19 @@ pub trait ForgeBackend: Sync {
         pr: &PullRequestDetails,
         request: CreateReviewRequest<'_>,
     ) -> Result<GhCreateReviewResponse>;
+
+    /// Merge the pull request using `method`.
+    ///
+    /// When the only obstacle is checks that have not finished, the backend
+    /// arms the forge's own merge-when-ready mode rather than failing, and
+    /// says so through `MergeOutcome::AutoMergeArmed`. Every other refusal —
+    /// conflicts, unsatisfied branch protection — comes back as an error
+    /// carrying text a user can act on.
+    fn merge_pull_request(
+        &self,
+        pr: &PullRequestDetails,
+        method: MergeMethod,
+    ) -> Result<MergeOutcome>;
 }
 
 #[cfg(test)]

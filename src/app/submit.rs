@@ -9,7 +9,7 @@ impl App {
     /// PR 5 does not call the network; `[y]` in the confirmation modal
     /// stubs a "PR 6 will wire the network call" info message.
     pub fn start_submit(&mut self, event: crate::forge::submit::SubmitEvent) {
-        self.start_submit_with(event, false);
+        self.start_submit_with(event, false, false);
     }
 
     /// Like `start_submit`, but when `skip_confirm` is `true` the flow
@@ -17,10 +17,15 @@ impl App {
     /// picking IS the confirmation; the resolver (if any unmappable
     /// comments) still runs first, then dispatches the network call
     /// directly. `:submit <event>` callers should pass `false`.
+    ///
+    /// `and_merge` asks for the PR to be merged once the review lands. It
+    /// forces the confirmation modal on, because merging a PR deserves a
+    /// deliberate `[y]` even when picking already read as consent.
     pub fn start_submit_with(
         &mut self,
         event: crate::forge::submit::SubmitEvent,
         skip_confirm: bool,
+        and_merge: bool,
     ) {
         use crate::forge::submit::{
             CommentAnchor, InlineComment, ResolverAction, UnmappableItem, map_comment,
@@ -120,6 +125,7 @@ impl App {
 
         let resolver_choices = vec![ResolverAction::default(); unmappable.len()];
         let has_unmappable = !unmappable.is_empty();
+        let skip_confirm = skip_confirm && !and_merge;
         self.submit_state = Some(SubmitState {
             event,
             mappable,
@@ -128,6 +134,7 @@ impl App {
             resolver_cursor: 0,
             commit_id,
             skip_confirm,
+            and_merge,
         });
 
         if has_unmappable {
@@ -153,9 +160,23 @@ impl App {
         self.input_mode = InputMode::SubmitActionPicker;
     }
 
+    /// Rows the picker offers for the current review target. "Approve &
+    /// Merge" only makes sense on a live PR, so it drops out for a merged or
+    /// closed one; outside PR mode there is no picker at all.
+    pub fn submit_picker_entries(&self) -> Vec<&'static SubmitPickerEntry> {
+        let mergeable = match &self.diff_source {
+            DiffSource::PullRequest(pr) => !pr.is_read_only(),
+            _ => false,
+        };
+        SUBMIT_PICKER_EVENTS
+            .iter()
+            .filter(|entry| mergeable || !entry.and_merge)
+            .collect()
+    }
+
     /// Move the action-picker cursor down by one row, wrapping at the end.
     pub fn submit_picker_cursor_down(&mut self) {
-        let total = SUBMIT_PICKER_EVENTS.len();
+        let total = self.submit_picker_entries().len();
         if total > 0 {
             self.submit_picker_cursor = (self.submit_picker_cursor + 1) % total;
         }
@@ -163,7 +184,7 @@ impl App {
 
     /// Move the action-picker cursor up by one row, wrapping at the start.
     pub fn submit_picker_cursor_up(&mut self) {
-        let total = SUBMIT_PICKER_EVENTS.len();
+        let total = self.submit_picker_entries().len();
         if total > 0 {
             self.submit_picker_cursor = (self.submit_picker_cursor + total - 1) % total;
         }
@@ -172,15 +193,16 @@ impl App {
     /// Confirm the action picker selection: dispatch into preflight with the
     /// chosen event and `skip_confirm = true`.
     pub fn submit_picker_confirm(&mut self) {
-        let Some(event) = SUBMIT_PICKER_EVENTS
+        let Some(entry) = self
+            .submit_picker_entries()
             .get(self.submit_picker_cursor)
-            .map(|(_, ev)| *ev)
+            .copied()
         else {
             self.cancel_submit_action_picker();
             return;
         };
         self.input_mode = InputMode::Normal;
-        self.start_submit_with(event, true);
+        self.start_submit_with(entry.event, true, entry.and_merge);
     }
 
     /// Cancel the action picker without entering preflight.
@@ -252,12 +274,27 @@ impl App {
         }
     }
 
+    /// True when the pending submit would merge a revision that is no longer
+    /// the PR head. Reviewing a stale head only risks outdated comments;
+    /// merging one ships code the user never read, so the merge variant is
+    /// refused outright until they reload.
+    pub fn submit_merge_blocked_by_stale_head(&self) -> bool {
+        self.submit_state
+            .as_ref()
+            .is_some_and(|state| state.and_merge)
+            && self.submit_head_is_stale()
+    }
+
     /// Confirm submit — PR 6 dispatches the async `gh api .../reviews` call.
     /// Builds the body + payload on the main thread, saves the session, then
     /// hands off to `spawn_pr_submit`. The modal disappears immediately; a
     /// status-bar spinner takes over until the result lands in
     /// `poll_pr_submit_events`.
     pub fn confirm_submit(&mut self) {
+        if self.submit_merge_blocked_by_stale_head() {
+            self.set_warning("PR head moved — reload with :e before merging");
+            return;
+        }
         if let Err(e) = self.spawn_pr_submit() {
             self.set_error(format!("Submit failed: {e}"));
             self.submit_state = None;
@@ -323,6 +360,7 @@ impl App {
 
         let in_flight = SubmitInFlightState {
             event: state.event,
+            and_merge: state.and_merge,
             mappable: state.mappable.clone(),
             summary_comment_ids,
             review_comment_ids,
@@ -347,6 +385,8 @@ impl App {
         let pr_number = in_flight.pr_number;
         let head_sha = in_flight.head_sha_snapshot.clone();
         let event = in_flight.event;
+        let and_merge = in_flight.and_merge;
+        let merge_method = self.forge_config.merge_method;
         let mappable = in_flight.mappable.clone();
         let commit_id = state.commit_id.clone();
         let show_pr_checks = self.show_pr_checks;
@@ -377,7 +417,18 @@ impl App {
                             comments: &mappable,
                         },
                     )
-                    .map_err(|e| e.to_string()),
+                    .map_err(|e| e.to_string())
+                    .map(|review| {
+                        // The review is published by this point, so a merge
+                        // failure travels alongside it rather than replacing
+                        // it — see `PrSubmitResult`.
+                        let merge = and_merge.then(|| {
+                            backend
+                                .merge_pull_request(&details, merge_method)
+                                .map_err(|e| e.to_string())
+                        });
+                        PrSubmitResult { review, merge }
+                    }),
                 Err(e) => Err(e.to_string()),
             };
             let _ = tx.send(PrSubmitEvent::Done {
@@ -452,12 +503,12 @@ impl App {
     pub fn finish_pr_submit(
         &mut self,
         in_flight: SubmitInFlightState,
-        result: std::result::Result<crate::forge::traits::GhCreateReviewResponse, String>,
+        result: std::result::Result<PrSubmitResult, String>,
     ) {
         use crate::forge::submit::SubmitEvent;
 
-        let response = match result {
-            Ok(r) => r,
+        let (response, merge) = match result {
+            Ok(r) => (r.review, r.merge),
             Err(e) => {
                 self.set_error(format!("Submit failed: {e}"));
                 return;
@@ -498,7 +549,14 @@ impl App {
         if in_flight.event != SubmitEvent::Draft {
             self.mark_pr_commits_reviewed_through(&in_flight.head_sha_snapshot);
         }
-        self.set_message(message);
+        match merge {
+            None => self.set_message(message),
+            Some(Ok(outcome)) => self.set_message(format!("{message} — {}", outcome.human_label())),
+            // The review landed; only the merge did not. Both halves have to
+            // reach the user, and the submit is not a failure — the comments
+            // are already posted and locked.
+            Some(Err(e)) => self.set_warning(format!("{message} — merge failed: {e}")),
+        }
 
         // Refetch remote threads so the just-submitted comments appear immediately.
         self.refetch_pr_threads();

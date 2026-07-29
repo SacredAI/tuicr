@@ -23,7 +23,10 @@ use super::models::{
     GlabApprovalState, GlabCommit, GlabDiff, GlabDiscussion, GlabMrDetails, GlabMrSummary,
     GlabMrVersion, GlabUser,
 };
-use crate::forge::submit::{DiffAnchor, GhSide, SubmitEvent};
+use crate::config::MergeMethod;
+use crate::forge::submit::{DiffAnchor, GhSide, MergeFailureKind, MergeOutcome, SubmitEvent, classify_merge_failure,
+    merge_failure_message,
+};
 use crate::forge::traits::CreateReviewRequest;
 
 const DEFAULT_GITLAB_HOST: &str = "gitlab.com";
@@ -789,12 +792,63 @@ where
             state: state.to_string(),
         })
     }
+
+    fn merge_pull_request(
+        &self,
+        pr: &PullRequestDetails,
+        method: MergeMethod,
+    ) -> Result<MergeOutcome> {
+        let direct = match self.runner.run(&Self::build_merge_args(pr, method, false)) {
+            Ok(_) => return Ok(MergeOutcome::Merged),
+            Err(err) => err,
+        };
+
+        let pipeline_pending = matches!(
+            &direct,
+            GlabCommandError::Failed { stderr, .. }
+                if classify_merge_failure(stderr) == MergeFailureKind::NotMergeableYet
+        );
+        if !pipeline_pending {
+            return Err(map_merge_error(direct, &pr.repository.host));
+        }
+
+        self.runner
+            .run(&Self::build_merge_args(pr, method, true))
+            .map(|_| MergeOutcome::AutoMergeArmed)
+            .map_err(|err| map_merge_error(err, &pr.repository.host))
+    }
 }
 
 impl<R> GitLabGlabBackend<R>
 where
     R: GlabCommandRunner,
 {
+    /// `glab mr merge` invocation for one method.
+    ///
+    /// GitLab has no rebase-merge: `--rebase` rebases the source branch onto
+    /// the target and then merges it, which is the closest equivalent. A
+    /// plain merge commit takes no method flag. `auto` switches to
+    /// `--when-pipeline-succeeds`, GitLab's answer to `gh pr merge --auto`.
+    fn build_merge_args(pr: &PullRequestDetails, method: MergeMethod, auto: bool) -> Vec<String> {
+        let mut args = vec![
+            "mr".to_string(),
+            "merge".to_string(),
+            pr.number.to_string(),
+            "--repo".to_string(),
+            Self::repo_arg(&pr.repository),
+            "--yes".to_string(),
+        ];
+        match method {
+            MergeMethod::Squash => args.push("--squash".to_string()),
+            MergeMethod::Rebase => args.push("--rebase".to_string()),
+            MergeMethod::Merge => {}
+        }
+        if auto {
+            args.push("--when-pipeline-succeeds".to_string());
+        }
+        args
+    }
+
     fn fetch_file_via_api(&self, request: &ForgeFileLinesRequest) -> Result<String> {
         let project = gl_project_path(&request.repository.owner, &request.repository.name);
         let path_str = request.path.to_string_lossy().replace('\\', "/");
@@ -1189,6 +1243,16 @@ fn check_graphql_errors(output: &str, mutation: &str) -> Result<()> {
             messages.join(", ")
         )))
     }
+}
+
+fn map_merge_error(error: GlabCommandError, host: &str) -> TuicrError {
+    if let GlabCommandError::Failed { ref stderr, .. } = error {
+        let kind = classify_merge_failure(stderr);
+        if kind != MergeFailureKind::Other {
+            return TuicrError::Forge(merge_failure_message(kind, "GitLab", stderr));
+        }
+    }
+    map_glab_error(error, host)
 }
 
 fn map_create_notes_error(error: GlabCommandError, host: &str) -> TuicrError {
@@ -2265,5 +2329,108 @@ mod tests {
     fn should_reject_empty_target() {
         assert!(parse_pull_request_target_gitlab("").is_err());
         assert!(parse_pull_request_target_gitlab("  ").is_err());
+    }
+
+    /// Runner for the merge path, replaying one scripted result per call.
+    struct MergeRunner {
+        calls: Mutex<Vec<Vec<String>>>,
+        results: Mutex<std::collections::VecDeque<GlabCommandResult<String>>>,
+    }
+
+    impl MergeRunner {
+        fn new(results: Vec<GlabCommandResult<String>>) -> Self {
+            Self {
+                calls: Mutex::new(Vec::new()),
+                results: Mutex::new(results.into()),
+            }
+        }
+
+        fn calls(&self) -> Vec<Vec<String>> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl GlabCommandRunner for MergeRunner {
+        fn run(&self, args: &[String]) -> GlabCommandResult<String> {
+            self.calls.lock().unwrap().push(args.to_vec());
+            self.results
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| Ok(String::new()))
+        }
+    }
+
+    fn merge_details() -> PullRequestDetails {
+        PullRequestDetails {
+            repository: ForgeRepository::gitlab("gitlab.com", "owner", "repo"),
+            number: 7,
+            title: "test".to_string(),
+            url: "https://gitlab.com/owner/repo/-/merge_requests/7".to_string(),
+            state: "opened".to_string(),
+            is_draft: false,
+            author: None,
+            head_ref_name: "feat".to_string(),
+            base_ref_name: "main".to_string(),
+            head_sha: "abc".to_string(),
+            base_sha: "def".to_string(),
+            body: String::new(),
+            updated_at: None,
+            closed: false,
+            merged_at: None,
+            diff_start_sha: None,
+        }
+    }
+
+    #[test]
+    fn should_map_each_merge_method_onto_a_glab_flag() {
+        // GitLab has no rebase-merge, so Rebase maps to `--rebase` (rebase
+        // then merge) and a plain merge commit carries no method flag.
+        for (method, flag) in [
+            (MergeMethod::Squash, Some("--squash")),
+            (MergeMethod::Rebase, Some("--rebase")),
+            (MergeMethod::Merge, None),
+        ] {
+            let runner = MergeRunner::new(vec![Ok(String::new())]);
+            let backend = GitLabGlabBackend::with_runner(None, runner);
+
+            let outcome = backend
+                .merge_pull_request(&merge_details(), method)
+                .unwrap();
+
+            assert_eq!(outcome, MergeOutcome::Merged);
+            let calls = backend.runner.calls();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0][..3], ["mr", "merge", "7"]);
+            assert!(calls[0].contains(&"--yes".to_string()));
+            match flag {
+                Some(flag) => assert!(calls[0].contains(&flag.to_string()), "{method:?}"),
+                None => {
+                    assert!(!calls[0].contains(&"--squash".to_string()));
+                    assert!(!calls[0].contains(&"--rebase".to_string()));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn should_wait_for_the_pipeline_when_it_has_not_succeeded_yet() {
+        let runner = MergeRunner::new(vec![
+            Err(GlabCommandError::Failed {
+                status: Some(1),
+                stderr: "Pipeline for merge request is not successful".to_string(),
+            }),
+            Ok(String::new()),
+        ]);
+        let backend = GitLabGlabBackend::with_runner(None, runner);
+
+        let outcome = backend
+            .merge_pull_request(&merge_details(), MergeMethod::Squash)
+            .unwrap();
+
+        assert_eq!(outcome, MergeOutcome::AutoMergeArmed);
+        let calls = backend.runner.calls();
+        assert_eq!(calls.len(), 2);
+        assert!(calls[1].contains(&"--when-pipeline-succeeds".to_string()));
     }
 }

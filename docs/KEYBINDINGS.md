@@ -233,7 +233,7 @@ In command mode,
 | `:vim` / `:novim` (`:set vim` / `:set novim`) | Enable/toggle/disable vim modal editing in the comment box (overrides `comment_vim`) |
 | `:set keymap vim` / `:set keymap helix` | Switch the key table for this session (overrides `keymap`) |
 | `:commits` | Select commits to review |
-| `:submit` | Open submit picker (Comment / Approve / Request changes / Draft) |
+| `:submit` | Open submit picker (Comment / Approve / Approve & Merge / Request changes / Draft) |
 | `:submit comment` | Submit a Comment review |
 | `:submit approve` | Submit an Approve review |
 | `:submit request-changes` | Submit a Request-changes review |
