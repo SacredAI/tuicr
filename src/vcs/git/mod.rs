@@ -341,6 +341,13 @@ impl VcsBackend for GitBackend {
         }
     }
 
+    fn read_file_bytes(&self, file_path: &Path, rev: Option<&str>) -> Result<Option<Vec<u8>>> {
+        match self {
+            Self::Libgit2(backend) => backend.read_file_bytes(file_path, rev),
+            Self::Cli(backend) => backend.read_file_bytes(file_path, rev),
+        }
+    }
+
     fn get_recent_commits(&self, offset: usize, limit: usize) -> Result<Vec<CommitInfo>> {
         match self {
             Self::Libgit2(backend) => backend.get_recent_commits(offset, limit),

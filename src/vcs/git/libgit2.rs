@@ -142,6 +142,10 @@ impl VcsBackend for Libgit2Backend {
         context::file_line_count(&self.repo, file_path, file_status, ref_commit)
     }
 
+    fn read_file_bytes(&self, file_path: &Path, rev: Option<&str>) -> Result<Option<Vec<u8>>> {
+        context::read_file_bytes(&self.repo, file_path, rev)
+    }
+
     fn get_recent_commits(&self, offset: usize, limit: usize) -> Result<Vec<CommitInfo>> {
         let git_commits = repository::get_recent_commits(&self.repo, offset, limit)?;
         Ok(git_commits
@@ -293,6 +297,45 @@ mod tests {
         assert!(
             backend.repo.workdir().is_some(),
             "worktree must report a workdir"
+        );
+    }
+
+    /// The whole point of the `read_file_bytes` seam: every other content read
+    /// in this backend goes through `str::from_utf8` or a lossy conversion,
+    /// either of which would destroy the image it is meant to display.
+    #[test]
+    fn should_read_binary_bytes_verbatim_from_both_sides_of_a_diff() {
+        // given a committed blob with non-UTF-8 bytes, replaced in the worktree
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo_path = temp.path().join("repo");
+        fs::create_dir_all(&repo_path).unwrap();
+        git(&repo_path, &["init", "-q", "-b", "main"]);
+        git(&repo_path, &["config", "user.email", "test@example.com"]);
+        git(&repo_path, &["config", "user.name", "Test User"]);
+
+        let committed: Vec<u8> = vec![0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe, 0x80];
+        let working: Vec<u8> = vec![0xff, 0xd8, 0xff, 0x00, 0x01, 0x02];
+        fs::write(repo_path.join("logo.png"), &committed).unwrap();
+        git(&repo_path, &["add", "logo.png"]);
+        git(&repo_path, &["commit", "-q", "-m", "add logo"]);
+        fs::write(repo_path.join("logo.png"), &working).unwrap();
+
+        let backend = Libgit2Backend::discover_from(&repo_path, DiffWhitespaceMode::Normal)
+            .expect("repo should open");
+        let path = Path::new("logo.png");
+
+        // when
+        let old = backend.read_file_bytes(path, Some("HEAD")).unwrap();
+        let new = backend.read_file_bytes(path, None).unwrap();
+        let missing = backend.read_file_bytes(Path::new("absent.png"), Some("HEAD"));
+
+        // then
+        assert_eq!(old.as_deref(), Some(committed.as_slice()));
+        assert_eq!(new.as_deref(), Some(working.as_slice()));
+        assert_eq!(
+            missing.unwrap(),
+            None,
+            "a path absent at the revision is an empty side, not an error"
         );
     }
 }

@@ -77,6 +77,31 @@ fn fetch_commit_blob_content(
     Ok(content.to_string())
 }
 
+/// Read a file's raw bytes from `rev`'s tree, or from the working tree.
+///
+/// A path missing at `rev`, or an unreadable working-tree file, is `Ok(None)`:
+/// one side of a binary diff legitimately has no content.
+pub fn read_file_bytes(
+    repo: &Repository,
+    file_path: &Path,
+    rev: Option<&str>,
+) -> Result<Option<Vec<u8>>> {
+    let Some(rev) = rev else {
+        let workdir = repo.workdir().ok_or(TuicrError::NotARepository)?;
+        return Ok(std::fs::read(workdir.join(file_path)).ok());
+    };
+    let Ok(tree) = repo.revparse_single(rev).and_then(|obj| obj.peel_to_tree()) else {
+        return Ok(None);
+    };
+    let Ok(entry) = tree.get_path(file_path) else {
+        return Ok(None);
+    };
+    Ok(repo
+        .find_blob(entry.id())
+        .ok()
+        .map(|b| b.content().to_vec()))
+}
+
 /// Calculate the number of hidden lines (gap) before a hunk.
 ///
 /// Returns the count of lines between the end of the previous hunk

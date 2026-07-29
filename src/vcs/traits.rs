@@ -229,6 +229,19 @@ pub trait VcsBackend: Send {
         ref_commit: Option<&str>,
     ) -> Result<u32>;
 
+    /// Read a file's raw bytes at one side of a diff.
+    ///
+    /// `rev` is `None` for the working tree, or a backend-specific revision
+    /// spec. Unlike [`VcsBackend::fetch_context_lines`] the bytes are returned
+    /// unchanged, so binary content survives.
+    ///
+    /// `Ok(None)` means "no bytes to show here" — the backend cannot read
+    /// bytes at all, or the path does not exist at `rev`. Callers fall back to
+    /// what the diff itself reports rather than treating it as a failure.
+    fn read_file_bytes(&self, _file_path: &Path, _rev: Option<&str>) -> Result<Option<Vec<u8>>> {
+        Ok(None)
+    }
+
     /// Get recent commits for commit selection UI.
     /// Returns empty vec if not supported (default).
     fn get_recent_commits(&self, _offset: usize, _limit: usize) -> Result<Vec<CommitInfo>> {

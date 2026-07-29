@@ -299,6 +299,14 @@ impl VcsBackend for GitCliBackend {
         Ok(content.lines().count() as u32)
     }
 
+    fn read_file_bytes(&self, file_path: &Path, rev: Option<&str>) -> Result<Option<Vec<u8>>> {
+        let Some(rev) = rev else {
+            return Ok(fs::read(self.root_path.join(file_path)).ok());
+        };
+        let spec = format!("{rev}:{}", file_path.to_string_lossy());
+        Ok(read_git_object_bytes(&self.root_path, &spec))
+    }
+
     fn get_recent_commits(&self, offset: usize, limit: usize) -> Result<Vec<CommitInfo>> {
         // Unborn HEAD (fresh `git init` / `git clone` of an empty remote):
         // `git log` returns 128 with "does not have any commits yet". Detect
@@ -1085,6 +1093,19 @@ fn read_git_objects(
 
 fn read_git_object(workdir: &Path, spec: &str) -> Option<String> {
     run_git_command(workdir, &["show", spec]).ok()
+}
+
+/// Reads an object's bytes verbatim.
+///
+/// `git show` goes through the string-returning command runner, which mangles
+/// non-UTF-8 content, so binary reads capture stdout directly instead.
+fn read_git_object_bytes(workdir: &Path, spec: &str) -> Option<Vec<u8>> {
+    let output = Command::new("git")
+        .current_dir(workdir)
+        .args(["cat-file", "blob", spec])
+        .output()
+        .ok()?;
+    output.status.success().then_some(output.stdout)
 }
 
 fn get_branch_tip_names(workdir: &Path) -> HashMap<String, Vec<String>> {
