@@ -279,6 +279,12 @@ fn parse_diff(diff: &Diff, highlighter: &SyntaxHighlighter) -> Result<Vec<DiffFi
     // content is not parsed — they are likely logs, dumps, or build artefacts.
     const MAX_UNTRACKED_FILE_SIZE: u64 = 10 * 1_024 * 1_024;
 
+    // libgit2 leaves every delta's binary flag false until the diff content has
+    // been walked at least once. Read straight from `diff.deltas()` and binary
+    // files look like text with no hunks. One file-callback-only pass sets the
+    // flags without materialising any hunks.
+    let _ = diff.foreach(&mut |_, _| true, None, None, None);
+
     for (delta_idx, delta) in diff.deltas().enumerate() {
         let status = match delta.status() {
             Delta::Added | Delta::Untracked => FileStatus::Added,
