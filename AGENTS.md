@@ -38,6 +38,8 @@ src/
 │   ├── diff_parser.rs   # Strict, count-driven hunk parser over structured FilePatch values
 │   ├── intraline.rs     # Word-level ranges per removed/added line pair, recorded
 │   │                    # on DiffLine.intraline at parse time (once, not per frame)
+│   ├── lfs.rs           # Git LFS pointer parsing, classification, and object resolution
+│   │                    # (local .git/lfs store, then `git lfs smudge`)
 │   ├── git/             # Git backend selector (libgit2 by default, CLI for sparse/opt-in)
 │   │   ├── mod.rs       # GitBackend wrapper, backend preference, repo mode detection
 │   │   ├── cli.rs       # Git CLI backend used for sparse checkouts and backend = "cli"

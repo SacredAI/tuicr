@@ -7,6 +7,7 @@ use crate::model::{DiffFile, DiffLine, FileStatus};
 use crate::syntax::SyntaxHighlighter;
 
 use super::{context, diff, repository, staging};
+use crate::vcs::lfs::FileBytes;
 use crate::vcs::traits::{
     ChangeKind, CommitInfo, DiffWhitespaceMode, ResolvedRevisionRange, VcsBackend, VcsInfo, VcsType,
 };
@@ -142,7 +143,7 @@ impl VcsBackend for Libgit2Backend {
         context::file_line_count(&self.repo, file_path, file_status, ref_commit)
     }
 
-    fn read_file_bytes(&self, file_path: &Path, rev: Option<&str>) -> Result<Option<Vec<u8>>> {
+    fn read_file_bytes(&self, file_path: &Path, rev: Option<&str>) -> Result<Option<FileBytes>> {
         context::read_file_bytes(&self.repo, file_path, rev)
     }
 
@@ -330,12 +331,157 @@ mod tests {
         let missing = backend.read_file_bytes(Path::new("absent.png"), Some("HEAD"));
 
         // then
-        assert_eq!(old.as_deref(), Some(committed.as_slice()));
-        assert_eq!(new.as_deref(), Some(working.as_slice()));
+        assert_eq!(
+            old.as_ref().and_then(FileBytes::bytes),
+            Some(committed.as_slice())
+        );
+        assert_eq!(
+            new.as_ref().and_then(FileBytes::bytes),
+            Some(working.as_slice())
+        );
         assert_eq!(
             missing.unwrap(),
             None,
             "a path absent at the revision is an empty side, not an error"
         );
+    }
+
+    fn init_repo(path: &Path) {
+        fs::create_dir_all(path).unwrap();
+        git(path, &["init", "-q", "-b", "main"]);
+        git(path, &["config", "user.email", "test@example.com"]);
+        git(path, &["config", "user.name", "Test User"]);
+    }
+
+    fn pointer_for(oid_seed: char, size: u64) -> String {
+        let oid: String = std::iter::repeat_n(oid_seed, 64).collect();
+        format!("version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize {size}\n")
+    }
+
+    fn store_lfs_object(repo_path: &Path, oid_seed: char, content: &[u8]) {
+        let oid: String = std::iter::repeat_n(oid_seed, 64).collect();
+        let path = crate::vcs::lfs::object_path(&repo_path.join(".git"), &oid);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, content).unwrap();
+    }
+
+    /// An LFS-tracked image must reach the image view as the image, on both
+    /// sides, without git-lfs being installed: the objects are already local.
+    #[test]
+    fn should_resolve_lfs_pointers_to_the_objects_in_the_local_store() {
+        // given a committed pointer and a different pointer in the worktree,
+        // each with its object present in .git/lfs/objects
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo_path = temp.path().join("repo");
+        init_repo(&repo_path);
+
+        let committed = b"\x89PNG\r\n\x1a\nold image".to_vec();
+        let working = b"\x89PNG\r\n\x1a\nnew image, longer".to_vec();
+        store_lfs_object(&repo_path, 'a', &committed);
+        store_lfs_object(&repo_path, 'b', &working);
+
+        fs::write(
+            repo_path.join("logo.png"),
+            pointer_for('a', committed.len() as u64),
+        )
+        .unwrap();
+        git(&repo_path, &["add", "logo.png"]);
+        git(&repo_path, &["commit", "-q", "-m", "add logo"]);
+        fs::write(
+            repo_path.join("logo.png"),
+            pointer_for('b', working.len() as u64),
+        )
+        .unwrap();
+
+        let backend = Libgit2Backend::discover_from(&repo_path, DiffWhitespaceMode::Normal)
+            .expect("repo should open");
+        let path = Path::new("logo.png");
+
+        // when
+        let old = backend.read_file_bytes(path, Some("HEAD")).unwrap();
+        let new = backend.read_file_bytes(path, None).unwrap();
+
+        // then
+        assert_eq!(
+            old.as_ref().and_then(FileBytes::bytes),
+            Some(committed.as_slice())
+        );
+        assert_eq!(
+            new.as_ref().and_then(FileBytes::bytes),
+            Some(working.as_slice())
+        );
+    }
+
+    /// Without the object, the pointer text is worthless to a reviewer; the
+    /// backend has to say so rather than hand back 130 bytes of metadata.
+    #[test]
+    fn should_report_an_unfetched_lfs_object_instead_of_the_pointer_text() {
+        // given a committed pointer whose object was never fetched
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo_path = temp.path().join("repo");
+        init_repo(&repo_path);
+        fs::write(repo_path.join("logo.png"), pointer_for('c', 4096)).unwrap();
+        git(&repo_path, &["add", "logo.png"]);
+        git(&repo_path, &["commit", "-q", "-m", "add logo"]);
+
+        let backend = Libgit2Backend::discover_from(&repo_path, DiffWhitespaceMode::Normal)
+            .expect("repo should open");
+
+        // when
+        let read = backend
+            .read_file_bytes(Path::new("logo.png"), Some("HEAD"))
+            .unwrap();
+
+        // then
+        assert!(
+            matches!(
+                read,
+                Some(FileBytes::Lfs {
+                    reason: crate::vcs::lfs::LfsMissing::NotFetched,
+                    ref pointer,
+                }) if pointer.size == 4096
+            ),
+            "an absent object must report itself, got {read:?}"
+        );
+    }
+
+    /// Git calls a pointer file text, so without this the reviewer reads a
+    /// three-line hash diff where an image belongs.
+    #[test]
+    fn should_classify_a_changed_lfs_pointer_as_a_binary_file() {
+        // given a committed pointer replaced by another in the worktree
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo_path = temp.path().join("repo");
+        init_repo(&repo_path);
+        fs::write(repo_path.join("logo.png"), pointer_for('a', 10)).unwrap();
+        fs::write(repo_path.join("notes.md"), "version notes\nsecond line\n").unwrap();
+        git(&repo_path, &["add", "."]);
+        git(&repo_path, &["commit", "-q", "-m", "add files"]);
+        fs::write(repo_path.join("logo.png"), pointer_for('b', 20)).unwrap();
+        fs::write(repo_path.join("notes.md"), "version notes\nthird line\n").unwrap();
+
+        let backend = Libgit2Backend::discover_from(&repo_path, DiffWhitespaceMode::Normal)
+            .expect("repo should open");
+
+        // when
+        let files = backend
+            .get_working_tree_diff(&SyntaxHighlighter::default())
+            .expect("diff should parse");
+
+        // then
+        let pointer_file = files
+            .iter()
+            .find(|f| f.display_path().ends_with("logo.png"))
+            .expect("pointer file in diff");
+        assert!(pointer_file.is_binary, "an LFS pointer diff is binary");
+        assert!(
+            pointer_file.hunks.is_empty(),
+            "a binary file shows no text hunks"
+        );
+        let text_file = files
+            .iter()
+            .find(|f| f.display_path().ends_with("notes.md"))
+            .expect("text file in diff");
+        assert!(!text_file.is_binary, "ordinary text stays text");
     }
 }

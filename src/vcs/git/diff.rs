@@ -7,7 +7,7 @@ use crate::syntax::SyntaxHighlighter;
 use crate::vcs::traits::{
     ChangeKind, DiffWhitespaceMode, ResolvedRevisionRange, RevisionDiffTarget,
 };
-use crate::vcs::{enhance_with_full_file_highlight, intraline, tabify};
+use crate::vcs::{enhance_with_full_file_highlight, intraline, lfs, tabify};
 
 pub fn get_working_tree_diff(
     repo: &Repository,
@@ -297,7 +297,7 @@ fn parse_diff(diff: &Diff) -> Result<Vec<DiffFile>> {
 
         let old_path = delta.old_file().path().map(PathBuf::from);
         let new_path = delta.new_file().path().map(PathBuf::from);
-        let is_binary = delta.old_file().is_binary() || delta.new_file().is_binary();
+        let mut is_binary = delta.old_file().is_binary() || delta.new_file().is_binary();
         let is_too_large =
             delta.status() == Delta::Untracked && delta.new_file().size() > MAX_UNTRACKED_FILE_SIZE;
 
@@ -306,6 +306,13 @@ fn parse_diff(diff: &Diff) -> Result<Vec<DiffFile>> {
         } else {
             parse_hunks(diff, delta_idx)?
         };
+
+        // An LFS-tracked file's blob is a text pointer, so git calls it text.
+        // The reviewer wants the media, not the pointer.
+        if lfs::hunks_are_pointer(&hunks) {
+            is_binary = true;
+            hunks.clear();
+        }
 
         let content_hash = DiffFile::compute_content_hash(&hunks);
         intraline::annotate_hunks(&mut hunks);

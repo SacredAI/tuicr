@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::error::Result;
 use crate::model::{DiffFile, DiffLine, FileStatus};
 use crate::syntax::SyntaxHighlighter;
+use crate::vcs::lfs::FileBytes;
 
 /// Information about the VCS type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -238,7 +239,10 @@ pub trait VcsBackend: Send {
     /// `Ok(None)` means "no bytes to show here" — the backend cannot read
     /// bytes at all, or the path does not exist at `rev`. Callers fall back to
     /// what the diff itself reports rather than treating it as a failure.
-    fn read_file_bytes(&self, _file_path: &Path, _rev: Option<&str>) -> Result<Option<Vec<u8>>> {
+    ///
+    /// A git-LFS pointer resolves to the object it names, or to
+    /// [`FileBytes::Lfs`] when that object is not available locally.
+    fn read_file_bytes(&self, _file_path: &Path, _rev: Option<&str>) -> Result<Option<FileBytes>> {
         Ok(None)
     }
 

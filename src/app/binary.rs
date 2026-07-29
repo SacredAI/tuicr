@@ -15,9 +15,10 @@ use ratatui_image::{Resize, protocol::Protocol};
 use super::*;
 use crate::model::comment::LineSide;
 use crate::ui::binary_view::{
-    BinaryBlock, BinaryFacts, FileKind, HEX_PREVIEW_BYTES, SideFacts, detect_kind,
+    BinaryBlock, BinaryFacts, FileKind, HEX_PREVIEW_BYTES, LfsNotice, SideFacts, detect_kind,
     has_image_extension,
 };
+use crate::vcs::lfs::{FileBytes, LfsMissing, Pointer};
 
 /// Columns the cursor indicator takes before a binary block's content.
 pub const BINARY_BLOCK_INDENT: u16 = 2;
@@ -40,6 +41,8 @@ pub struct BinarySide {
     pub size: Option<u64>,
     pub kind: Option<FileKind>,
     pub dimensions: Option<(u32, u32)>,
+    /// Set when the side is an LFS object we could not resolve.
+    pub lfs: Option<LfsNotice>,
 }
 
 impl BinarySide {
@@ -48,6 +51,7 @@ impl BinarySide {
             size: self.size,
             kind: self.kind,
             dimensions: self.dimensions,
+            lfs: self.lfs.clone(),
         }
     }
 }
@@ -112,16 +116,11 @@ impl App {
                 (LineSide::New, new_path, new_rev.as_deref()),
             ] {
                 let Some(path) = path else { continue };
-                let bytes = self
-                    .vcs
-                    .read_file_bytes(&path, rev)
-                    .ok()
-                    .flatten()
-                    .unwrap_or_default();
-                if bytes.is_empty() {
-                    continue;
-                }
-                let filled = build_side(bytes, &path);
+                let filled = match self.vcs.read_file_bytes(&path, rev).ok().flatten() {
+                    Some(FileBytes::Bytes(bytes)) if !bytes.is_empty() => build_side(bytes, &path),
+                    Some(FileBytes::Lfs { pointer, reason }) => lfs_side(pointer, reason),
+                    _ => continue,
+                };
                 if let Some(bytes) = filled.bytes.clone()
                     && filled.kind.is_some_and(|k| k.is_image())
                 {
@@ -318,6 +317,26 @@ fn build_side(bytes: Vec<u8>, path: &Path) -> BinarySide {
         size: Some(size),
         kind: Some(kind),
         dimensions,
+        lfs: None,
+    }
+}
+
+/// The facts an unresolved LFS object can still state.
+///
+/// The pointer knows the real content's size even when the content itself is
+/// absent, so the card reports a true size rather than the pointer's 130-odd
+/// bytes.
+fn lfs_side(pointer: Pointer, reason: LfsMissing) -> BinarySide {
+    BinarySide {
+        bytes: None,
+        preview: Vec::new(),
+        size: Some(pointer.size),
+        kind: Some(FileKind::Other("Git LFS object")),
+        dimensions: None,
+        lfs: Some(LfsNotice {
+            oid: pointer.oid,
+            reason,
+        }),
     }
 }
 

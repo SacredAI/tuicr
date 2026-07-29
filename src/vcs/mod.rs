@@ -17,6 +17,7 @@ pub mod git;
 mod hg;
 pub(crate) mod intraline;
 mod jj;
+pub mod lfs;
 pub mod pr_noop;
 pub mod pristine;
 pub(crate) mod traits;

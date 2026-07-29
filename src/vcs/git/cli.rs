@@ -15,6 +15,7 @@ use crate::vcs::git::raw::{
     pair_metadata_with_patch, parse_raw_metadata_from_patch_output, parse_raw_patch_output,
     patch_text_from_raw_patch_output, split_patch_blocks,
 };
+use crate::vcs::lfs::{self, FileBytes};
 use crate::vcs::{
     ChangeKind, CommitInfo, DiffWhitespaceMode, ResolvedRevisionRange, RevisionDiffTarget,
     VcsBackend, VcsChangeStatus, VcsInfo,
@@ -299,12 +300,20 @@ impl VcsBackend for GitCliBackend {
         Ok(content.lines().count() as u32)
     }
 
-    fn read_file_bytes(&self, file_path: &Path, rev: Option<&str>) -> Result<Option<Vec<u8>>> {
-        let Some(rev) = rev else {
-            return Ok(fs::read(self.root_path.join(file_path)).ok());
+    fn read_file_bytes(&self, file_path: &Path, rev: Option<&str>) -> Result<Option<FileBytes>> {
+        let bytes = match rev {
+            None => fs::read(self.root_path.join(file_path)).ok(),
+            Some(rev) => {
+                let spec = format!("{rev}:{}", file_path.to_string_lossy());
+                read_git_object_bytes(&self.root_path, &spec)
+            }
         };
-        let spec = format!("{rev}:{}", file_path.to_string_lossy());
-        Ok(read_git_object_bytes(&self.root_path, &spec))
+        let common_dir = git_common_dir(&self.root_path);
+        let store = lfs::Store {
+            common_dir: &common_dir,
+            workdir: Some(&self.root_path),
+        };
+        Ok(bytes.map(|bytes| lfs::resolve(bytes, &store)))
     }
 
     fn get_recent_commits(&self, offset: usize, limit: usize) -> Result<Vec<CommitInfo>> {
@@ -1107,6 +1116,22 @@ fn read_git_object_bytes(workdir: &Path, spec: &str) -> Option<Vec<u8>> {
         .output()
         .ok()?;
     output.status.success().then_some(output.stdout)
+}
+
+/// The repository's common `.git` directory, where LFS objects live.
+///
+/// A worktree's own gitdir holds no LFS store, so ask git for the common one
+/// and fall back to `.git` when the call fails.
+fn git_common_dir(workdir: &Path) -> PathBuf {
+    let Ok(output) = run_git_command(workdir, &["rev-parse", "--git-common-dir"]) else {
+        return workdir.join(".git");
+    };
+    let dir = PathBuf::from(output.trim());
+    if dir.is_absolute() {
+        dir
+    } else {
+        workdir.join(dir)
+    }
 }
 
 fn get_branch_tip_names(workdir: &Path) -> HashMap<String, Vec<String>> {

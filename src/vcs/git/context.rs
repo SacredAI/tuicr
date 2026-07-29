@@ -3,6 +3,7 @@ use std::path::Path;
 
 use crate::error::{Result, TuicrError};
 use crate::model::{DiffLine, FileStatus};
+use crate::vcs::lfs::{self, FileBytes};
 use crate::vcs::slice_context_lines;
 
 /// Fetch context lines from a file for gap expansion.
@@ -80,8 +81,29 @@ fn fetch_commit_blob_content(
 /// Read a file's raw bytes from `rev`'s tree, or from the working tree.
 ///
 /// A path missing at `rev`, or an unreadable working-tree file, is `Ok(None)`:
-/// one side of a binary diff legitimately has no content.
+/// one side of a binary diff legitimately has no content. A git-LFS pointer is
+/// resolved to the object it names.
 pub fn read_file_bytes(
+    repo: &Repository,
+    file_path: &Path,
+    rev: Option<&str>,
+) -> Result<Option<FileBytes>> {
+    let bytes = read_raw_bytes(repo, file_path, rev)?;
+    Ok(bytes.map(|bytes| lfs::resolve(bytes, &lfs_store(repo))))
+}
+
+/// The LFS object store for `repo`.
+///
+/// Worktrees share the main repository's store, so this reads the common
+/// directory rather than the per-worktree gitdir.
+fn lfs_store(repo: &Repository) -> lfs::Store<'_> {
+    lfs::Store {
+        common_dir: repo.commondir(),
+        workdir: repo.workdir(),
+    }
+}
+
+fn read_raw_bytes(
     repo: &Repository,
     file_path: &Path,
     rev: Option<&str>,

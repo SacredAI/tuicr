@@ -11,6 +11,7 @@ use ratatui::text::{Line, Span};
 use crate::model::comment::LineSide;
 use crate::theme::Theme;
 use crate::ui::styles;
+use crate::vcs::lfs::LfsMissing;
 
 /// Bytes shown in the hex dump preview.
 pub const HEX_PREVIEW_BYTES: usize = 256;
@@ -166,6 +167,36 @@ pub fn hex_dump(bytes: &[u8]) -> Vec<String> {
         .collect()
 }
 
+/// A git-LFS object the diff could not show, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LfsNotice {
+    pub oid: String,
+    pub reason: LfsMissing,
+}
+
+impl LfsNotice {
+    fn summary(&self) -> &'static str {
+        match self.reason {
+            LfsMissing::NotFetched => "LFS object not fetched",
+            LfsMissing::TooLarge => "LFS object too large to show",
+        }
+    }
+
+    /// The card's line: what is wrong, which object, and what to do about it.
+    fn detail(&self, size: Option<u64>) -> String {
+        let size = size.map(format_size).unwrap_or_else(|| "?".to_string());
+        let oid = &self.oid[..self.oid.len().min(12)];
+        match self.reason {
+            LfsMissing::NotFetched => {
+                format!("LFS object not present locally (oid {oid}…, {size}) — run `git lfs fetch`")
+            }
+            LfsMissing::TooLarge => {
+                format!("LFS object too large to show (oid {oid}…, {size})")
+            }
+        }
+    }
+}
+
 /// What one side of a binary diff holds, as far as the VCS could tell us.
 #[derive(Debug, Clone, Default)]
 pub struct SideFacts {
@@ -173,6 +204,9 @@ pub struct SideFacts {
     pub size: Option<u64>,
     pub kind: Option<FileKind>,
     pub dimensions: Option<(u32, u32)>,
+    /// Set when the side is an LFS pointer whose content we could not resolve;
+    /// `size` then comes from the pointer, not from bytes we hold.
+    pub lfs: Option<LfsNotice>,
 }
 
 impl SideFacts {
@@ -184,10 +218,18 @@ impl SideFacts {
         let Some(size) = self.size else {
             return format!("{name}: (none)");
         };
+        if let Some(notice) = &self.lfs {
+            return format!("{name}: {}, {}", format_size(size), notice.summary());
+        }
         match self.dimensions {
             Some((w, h)) => format!("{name}: {w}×{h}, {}", format_size(size)),
             None => format!("{name}: {}", format_size(size)),
         }
+    }
+
+    /// Whether an image pane can be painted for this side.
+    fn has_content(&self) -> bool {
+        self.size.is_some() && self.lfs.is_none()
     }
 }
 
@@ -286,7 +328,7 @@ fn image_block<'a>(
         for side in [LineSide::Old, LineSide::New] {
             let facts_for = side_facts(facts, side);
             lines.push(Line::from(Span::styled(facts_for.label(side), dim)));
-            if facts_for.size.is_some() {
+            if facts_for.has_content() {
                 panes.push(ImagePane {
                     side,
                     row: lines.len() as u16,
@@ -307,7 +349,7 @@ fn image_block<'a>(
         );
         lines.push(Line::from(Span::styled(label, dim)));
         for (side, column) in [(LineSide::Old, 0), (LineSide::New, pane_width + 1)] {
-            if side_facts(facts, side).size.is_some() {
+            if side_facts(facts, side).has_content() {
                 panes.push(ImagePane {
                     side,
                     row: 1,
@@ -349,6 +391,12 @@ fn metadata_block<'a>(theme: &Theme, facts: &BinaryFacts<'_>) -> BinaryBlock<'a>
     }
     lines.push(Line::from(Span::styled(new_label, dim)));
     lines.push(Line::default());
+
+    for side in [&facts.old, &facts.new] {
+        if let Some(notice) = &side.lfs {
+            lines.push(Line::from(Span::styled(notice.detail(side.size), dim)));
+        }
+    }
 
     if facts.preview.is_empty() {
         lines.push(Line::from(Span::styled(
@@ -499,11 +547,13 @@ mod tests {
                 size: Some(1000),
                 kind: Some(FileKind::Image("PNG image")),
                 dimensions: Some((32, 32)),
+                lfs: None,
             },
             new: SideFacts {
                 size: Some(2000),
                 kind: Some(FileKind::Image("PNG image")),
                 dimensions: Some((64, 64)),
+                lfs: None,
             },
             preview: &[],
             preview_total: 0,
@@ -573,6 +623,45 @@ mod tests {
         assert_eq!(block.panes[0].side, LineSide::New);
     }
 
+    /// The reviewer needs to know the image is missing and how to get it,
+    /// not read a hex dump of a pointer.
+    #[test]
+    fn should_name_the_missing_lfs_object_and_the_command_that_fetches_it() {
+        // given a new side whose LFS object was never fetched
+        let theme = Theme::default();
+        let facts = BinaryFacts {
+            old: SideFacts::default(),
+            new: SideFacts {
+                size: Some(3 * 1024 * 1024),
+                kind: Some(FileKind::Other("Git LFS object")),
+                dimensions: None,
+                lfs: Some(LfsNotice {
+                    oid: "4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393"
+                        .to_string(),
+                    reason: LfsMissing::NotFetched,
+                }),
+            },
+            preview: &[],
+            preview_total: 0,
+            loading: false,
+        };
+
+        // when
+        let block = binary_block(&theme, &facts, 80, 40);
+
+        // then
+        let rendered: Vec<String> = block.lines.iter().map(Line::to_string).collect();
+        assert!(
+            block.panes.is_empty(),
+            "no bytes means no image pane to paint"
+        );
+        assert!(
+            rendered.iter().any(|line| line
+                == "LFS object not present locally (oid 4d7a214614ab…, 3.0 MiB) — run `git lfs fetch`"),
+            "card must name the object and the fix, got {rendered:?}"
+        );
+    }
+
     #[test]
     fn should_render_a_metadata_card_with_a_hex_dump_for_non_images() {
         // given
@@ -583,11 +672,13 @@ mod tests {
                 size: Some(100),
                 kind: Some(FileKind::Other("PDF document")),
                 dimensions: None,
+                lfs: None,
             },
             new: SideFacts {
                 size: Some(220),
                 kind: Some(FileKind::Other("PDF document")),
                 dimensions: None,
+                lfs: None,
             },
             preview,
             preview_total: 220,

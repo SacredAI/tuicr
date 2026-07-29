@@ -14,6 +14,7 @@ use crate::model::{DiffFile, DiffLine, FileStatus};
 use crate::process::{CommandOutputError, CommandOutputErrorKind, run_command_output};
 use crate::syntax::SyntaxHighlighter;
 
+use super::lfs::FileBytes;
 use super::traits::{
     ChangeKind, CommitInfo, DiffWhitespaceMode, ResolvedRevisionRange, VcsBackend, VcsChangeStatus,
     VcsInfo,
@@ -341,7 +342,7 @@ impl VcsBackend for GitBackend {
         }
     }
 
-    fn read_file_bytes(&self, file_path: &Path, rev: Option<&str>) -> Result<Option<Vec<u8>>> {
+    fn read_file_bytes(&self, file_path: &Path, rev: Option<&str>) -> Result<Option<FileBytes>> {
         match self {
             Self::Libgit2(backend) => backend.read_file_bytes(file_path, rev),
             Self::Cli(backend) => backend.read_file_bytes(file_path, rev),
