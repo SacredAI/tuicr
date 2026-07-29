@@ -517,6 +517,93 @@ fn lazy_highlight_renders_identically_to_eager() {
     println!("\n{compared} frames identical between lazy and eager highlighting");
 }
 
+/// Synthetic unified diff shaped like `gh pr diff` output, so the PR open
+/// path can be timed without a network round trip.
+fn build_patch(files: usize, hunks_per_file: usize, lines_per_hunk: usize) -> String {
+    let mut rng = Rng(0x2545F491_4F6CDD1D);
+    let mut out = String::new();
+    for f in 0..files {
+        let path = format!("src/module_{}/component_{f}.rs", f % 17);
+        out.push_str(&format!("diff --git a/{path} b/{path}\n"));
+        out.push_str("index 1111111..2222222 100644\n");
+        out.push_str(&format!("--- a/{path}\n+++ b/{path}\n"));
+        for h in 0..hunks_per_file {
+            let start = h * lines_per_hunk + 1;
+            out.push_str(&format!(
+                "@@ -{start},{lines_per_hunk} +{start},{lines_per_hunk} @@\n"
+            ));
+            for l in 0..lines_per_hunk {
+                let prefix = match rng.below(4) {
+                    0 => '+',
+                    1 => '-',
+                    _ => ' ',
+                };
+                out.push(prefix);
+                out.push_str(&source_line(&mut rng, f * 1000 + h * 100 + l));
+                out.push('\n');
+            }
+        }
+    }
+    out
+}
+
+/// Time the CPU-only half of the PR open (parse + `.tuicrignore` +
+/// session build) so we can tell whether it belongs on the background
+/// thread beside the network fetch.
+#[test]
+#[ignore = "timing harness; run explicitly with --ignored"]
+fn perf_bench_pr_open_prepare() {
+    use crate::forge::traits::{ForgeRepository, PullRequestDetails};
+
+    for (files, hunks, lines) in [(10usize, 3usize, 20usize), (300, 6, 30)] {
+        let patch = build_patch(files, hunks, lines);
+        println!(
+            "\n=== patch: {files} files x {hunks} hunks x {lines} lines = {} KiB ===",
+            patch.len() / 1024
+        );
+
+        let details = PullRequestDetails {
+            repository: ForgeRepository::github("github.com", "agavra", "tuicr"),
+            number: 1,
+            title: String::new(),
+            url: String::new(),
+            state: "OPEN".to_string(),
+            is_draft: false,
+            author: None,
+            head_ref_name: "head".to_string(),
+            base_ref_name: "main".to_string(),
+            head_sha: "abcdef0123456789".to_string(),
+            base_sha: "1234567890abcdef".to_string(),
+            body: String::new(),
+            updated_at: None,
+            closed: false,
+            merged_at: None,
+            diff_start_sha: None,
+        };
+
+        let t = Instant::now();
+        let parsed = crate::vcs::diff_parser::parse_unified_diff(
+            &patch,
+            crate::vcs::diff_parser::DiffFormat::GitStyle,
+        )
+        .expect("parse");
+        println!("{:<28} {:>9.3?}", "parse_unified_diff", t.elapsed());
+        assert_eq!(parsed.len(), files);
+
+        let t = Instant::now();
+        let opened = crate::forge::pr_open::prepare_open_pr(
+            details,
+            &patch,
+            Vec::new(),
+            Default::default(),
+            None,
+        )
+        .expect("prepare");
+        println!("{:<28} {:>9.3?}", "prepare_open_pr (total)", t.elapsed());
+        assert_eq!(opened.diff_files.len(), files);
+    }
+}
+
 /// Worst case for per-file laziness: one very large file, whose whole
 /// highlight cost lands on the frame that first shows it.
 #[test]
