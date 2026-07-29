@@ -175,10 +175,10 @@ mod tests {
         PullRequestTarget,
     };
     use crate::model::LineOrigin;
-    use std::cell::RefCell;
+    use std::sync::Mutex;
 
     struct CapturingForge {
-        seen: RefCell<Vec<ForgeFileLinesRequest>>,
+        seen: Mutex<Vec<ForgeFileLinesRequest>>,
         response: Vec<DiffLine>,
     }
 
@@ -196,7 +196,7 @@ mod tests {
             unimplemented!()
         }
         fn fetch_file_lines(&self, request: ForgeFileLinesRequest) -> Result<Vec<DiffLine>> {
-            self.seen.borrow_mut().push(request);
+            self.seen.lock().unwrap().push(request);
             Ok(self.response.clone())
         }
         fn list_review_threads(
@@ -251,7 +251,7 @@ mod tests {
     fn should_use_head_side_for_modified_file() {
         // given
         let forge = CapturingForge {
-            seen: RefCell::new(Vec::new()),
+            seen: Mutex::new(Vec::new()),
             response: vec![make_line("a")],
         };
         let provider = ForgeContextProvider::for_pr(&forge, &key(), "basesha");
@@ -261,7 +261,7 @@ mod tests {
             .fetch_context_lines(None, Some(&new_path), FileStatus::Modified, 1, 1)
             .unwrap();
         // then
-        let seen = forge.seen.borrow();
+        let seen = forge.seen.lock().unwrap();
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].side, ForgeFileSide::Head);
         assert_eq!(seen[0].sha(), "headsha");
@@ -272,7 +272,7 @@ mod tests {
     fn should_use_base_side_for_deleted_file() {
         // given
         let forge = CapturingForge {
-            seen: RefCell::new(Vec::new()),
+            seen: Mutex::new(Vec::new()),
             response: vec![],
         };
         let provider = ForgeContextProvider::for_pr(&forge, &key(), "basesha");
@@ -282,7 +282,7 @@ mod tests {
             .fetch_context_lines(Some(&old_path), None, FileStatus::Deleted, 1, 1)
             .unwrap();
         // then
-        let seen = forge.seen.borrow();
+        let seen = forge.seen.lock().unwrap();
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].side, ForgeFileSide::Base);
         assert_eq!(seen[0].sha(), "basesha");
@@ -309,7 +309,7 @@ mod tests {
     fn should_short_circuit_when_path_missing() {
         // given a file with no paths at all (degenerate case)
         let forge = CapturingForge {
-            seen: RefCell::new(Vec::new()),
+            seen: Mutex::new(Vec::new()),
             response: vec![make_line("x")],
         };
         let provider = ForgeContextProvider::for_pr(&forge, &key(), "basesha");
@@ -319,6 +319,6 @@ mod tests {
             .unwrap();
         // then — empty result, no backend call
         assert!(result.is_empty());
-        assert!(forge.seen.borrow().is_empty());
+        assert!(forge.seen.lock().unwrap().is_empty());
     }
 }

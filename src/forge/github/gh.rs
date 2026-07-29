@@ -62,7 +62,7 @@ pub enum GhCommandError {
 
 pub type GhCommandResult<T> = std::result::Result<T, GhCommandError>;
 
-pub trait GhCommandRunner {
+pub trait GhCommandRunner: Sync {
     fn run(&self, args: &[String]) -> GhCommandResult<String>;
 
     /// Variant for `gh` invocations that take their payload on stdin (e.g.
@@ -1055,7 +1055,7 @@ index 1111111..2222222 100644
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::sync::Mutex;
 
     use super::*;
     use crate::forge::traits::ForgeBackend;
@@ -1120,21 +1120,21 @@ index 1111111..2222222 100644
 
     #[derive(Default)]
     struct FakeGhRunner {
-        calls: RefCell<Vec<Vec<String>>>,
+        calls: Mutex<Vec<Vec<String>>>,
         /// Captured stdin payloads, paired in order with `calls` entries that
         /// went through `run_with_stdin`. Empty for plain `run` invocations.
-        stdin_calls: RefCell<Vec<(Vec<String>, String)>>,
+        stdin_calls: Mutex<Vec<(Vec<String>, String)>>,
         /// When set, `run_with_stdin` returns this error instead of a stub
         /// success response. Lets tests exercise error mapping.
-        stdin_error: RefCell<Option<GhCommandError>>,
+        stdin_error: Mutex<Option<GhCommandError>>,
         /// When set, `run_with_stdin` returns this body as the success output.
         /// Defaults to `CREATE_REVIEW_RESPONSE_JSON` when None.
-        stdin_response: RefCell<Option<String>>,
+        stdin_response: Mutex<Option<String>>,
     }
 
     impl GhCommandRunner for FakeGhRunner {
         fn run(&self, args: &[String]) -> GhCommandResult<String> {
-            self.calls.borrow_mut().push(args.to_vec());
+            self.calls.lock().unwrap().push(args.to_vec());
             match args.first().map(String::as_str) {
                 // gh pr list/view/diff — second arg is the subcommand.
                 Some("pr") => match args.get(1).map(String::as_str) {
@@ -1203,16 +1203,18 @@ index 1111111..2222222 100644
         }
 
         fn run_with_stdin(&self, args: &[String], stdin: &str) -> GhCommandResult<String> {
-            self.calls.borrow_mut().push(args.to_vec());
+            self.calls.lock().unwrap().push(args.to_vec());
             self.stdin_calls
-                .borrow_mut()
+                .lock()
+                .unwrap()
                 .push((args.to_vec(), stdin.to_string()));
-            if let Some(err) = self.stdin_error.borrow().clone() {
+            if let Some(err) = self.stdin_error.lock().unwrap().clone() {
                 return Err(err);
             }
             Ok(self
                 .stdin_response
-                .borrow()
+                .lock()
+                .unwrap()
                 .clone()
                 .unwrap_or_else(|| CREATE_REVIEW_RESPONSE_JSON.to_string()))
         }
@@ -1630,7 +1632,7 @@ Match host github-work
         assert_eq!(result.pull_requests[0].number, 148);
         assert_eq!(result.pull_requests[0].author.as_deref(), Some("alice"));
 
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         assert_eq!(
             calls[0],
             vec![
@@ -1660,7 +1662,7 @@ Match host github-work
             ))
             .unwrap();
 
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         assert_eq!(
             calls[0],
             vec![
@@ -1698,7 +1700,7 @@ Match host github-work
         assert_eq!(result.total_loaded, 2);
         assert_eq!(result.pull_requests[0].number, 125);
 
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         assert_eq!(
             calls[0],
             vec![
@@ -1725,7 +1727,7 @@ Match host github-work
             .list_pull_requests(PullRequestListQuery::first_page(repository, 1))
             .unwrap();
 
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         assert_eq!(calls[0][3], "github.example.com/agavra/tuicr");
     }
 
@@ -1834,7 +1836,7 @@ Match host github-work
             .unwrap();
         let _ = backend.get_pull_request_diff(&details).unwrap();
 
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         let diff_call = calls
             .iter()
             .find(|args| {
@@ -1864,7 +1866,7 @@ Match host github-work
         assert_eq!(threads[0].path, "src/lib.rs");
         // and — the API call was placed against `gh api graphql` with the
         // owner/name/number parameters.
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         let graphql_call = calls
             .iter()
             .find(|args| args.first().map(String::as_str) == Some("api"))
@@ -1891,7 +1893,7 @@ Match host github-work
         assert_eq!(summaries[0].author.as_deref(), Some("alice"));
         assert_eq!(summaries[0].body, "Overall LGTM");
         // and — the call routes the `reviews(` query, not `reviewThreads(`.
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         let summaries_call = calls
             .iter()
             .find(|args| {
@@ -1922,7 +1924,7 @@ Match host github-work
             Some("bbbbbbb2222222222222222222222222222bbbb")
         );
         // and — the query requests viewer login and review commit oids.
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         let metadata_call = calls
             .iter()
             .find(|args| {
@@ -1954,7 +1956,7 @@ Match host github-work
         assert!(commits[0].timestamp.is_some());
         assert_eq!(commits[1].summary, "Second commit");
         // and — the call targeted the pulls/<n>/commits endpoint.
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         let commits_call = calls
             .iter()
             .find(|args| {
@@ -1981,7 +1983,7 @@ Match host github-work
         assert_eq!(diff.len(), 1);
         assert!(diff[0].patch.contains("diff --git a/src/lib.rs"));
         // and — the call hit the compare endpoint with the Accept diff header.
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         let compare_call = calls
             .iter()
             .find(|args| {
@@ -2058,7 +2060,7 @@ Match host github-work
         assert!(response.html_url.contains("pullrequestreview-123456"));
 
         // and — the call hit the expected endpoint with stdin
-        let stdin_calls = backend.runner.stdin_calls.borrow();
+        let stdin_calls = backend.runner.stdin_calls.lock().unwrap();
         assert_eq!(stdin_calls.len(), 1);
         let (args, stdin) = &stdin_calls[0];
         assert_eq!(args[0], "api");
@@ -2102,7 +2104,7 @@ Match host github-work
             )
             .unwrap();
         // then — the payload omits `event`
-        let stdin_calls = backend.runner.stdin_calls.borrow();
+        let stdin_calls = backend.runner.stdin_calls.lock().unwrap();
         let (_, stdin) = &stdin_calls[0];
         let payload: serde_json::Value = serde_json::from_str(stdin).unwrap();
         assert!(payload.get("event").is_none());
@@ -2131,7 +2133,7 @@ Match host github-work
             )
             .unwrap();
         // then
-        let stdin_calls = backend.runner.stdin_calls.borrow();
+        let stdin_calls = backend.runner.stdin_calls.lock().unwrap();
         let (args, _) = &stdin_calls[0];
         assert!(args.iter().any(|a| a == "--hostname"));
         assert!(args.iter().any(|a| a == "github.example.com"));
@@ -2141,7 +2143,7 @@ Match host github-work
     fn should_map_permission_failure_to_pull_request_write_message() {
         // given — a runner that fails with a 403-style stderr
         let runner = FakeGhRunner::default();
-        *runner.stdin_error.borrow_mut() = Some(GhCommandError::Failed {
+        *runner.stdin_error.lock().unwrap() = Some(GhCommandError::Failed {
             status: Some(1),
             stderr: "HTTP 403: Resource not accessible by integration".to_string(),
         });
@@ -2173,7 +2175,7 @@ Match host github-work
     fn should_map_auth_failure_during_create_review() {
         // given — a runner that fails with auth-failure stderr
         let runner = FakeGhRunner::default();
-        *runner.stdin_error.borrow_mut() = Some(GhCommandError::Failed {
+        *runner.stdin_error.lock().unwrap() = Some(GhCommandError::Failed {
             status: Some(4),
             stderr: "Run `gh auth login` to authenticate".to_string(),
         });
@@ -2201,7 +2203,7 @@ Match host github-work
     fn should_map_missing_gh_during_create_review() {
         // given — gh is not installed
         let runner = FakeGhRunner::default();
-        *runner.stdin_error.borrow_mut() = Some(GhCommandError::MissingGh);
+        *runner.stdin_error.lock().unwrap() = Some(GhCommandError::MissingGh);
         let backend = GitHubGhBackend::with_runner(Some(repo()), runner);
         let details = backend
             .get_pull_request(parse_pull_request_target("125").unwrap())
@@ -2226,7 +2228,7 @@ Match host github-work
     fn should_error_when_create_review_response_is_missing_id() {
         // given — malformed response from gh
         let runner = FakeGhRunner::default();
-        *runner.stdin_response.borrow_mut() =
+        *runner.stdin_response.lock().unwrap() =
             Some(r#"{"html_url": "x", "state": "COMMENTED"}"#.to_string());
         let backend = GitHubGhBackend::with_runner(Some(repo()), runner);
         let details = backend
@@ -2252,7 +2254,7 @@ Match host github-work
     fn should_recognize_must_have_pull_request_write_as_permission_failure() {
         // given
         let runner = FakeGhRunner::default();
-        *runner.stdin_error.borrow_mut() = Some(GhCommandError::Failed {
+        *runner.stdin_error.lock().unwrap() = Some(GhCommandError::Failed {
             status: Some(1),
             stderr: "must have pull request write permission".to_string(),
         });
@@ -2281,7 +2283,7 @@ Match host github-work
         // 422 from GitHub when a pending review already exists for this user
         // on this PR. We surface a clear actionable message.
         let runner = FakeGhRunner::default();
-        *runner.stdin_error.borrow_mut() = Some(GhCommandError::Failed {
+        *runner.stdin_error.lock().unwrap() = Some(GhCommandError::Failed {
             status: Some(22),
             stderr: "gh: Unprocessable Entity (HTTP 422)\n\
                 {\"message\":\"Unprocessable Entity\",\"errors\":\
@@ -2316,7 +2318,7 @@ Match host github-work
         // 422 from GitHub when commit_id isn't part of the PR (e.g., the PR
         // was force-pushed since the session loaded).
         let runner = FakeGhRunner::default();
-        *runner.stdin_error.borrow_mut() = Some(GhCommandError::Failed {
+        *runner.stdin_error.lock().unwrap() = Some(GhCommandError::Failed {
             status: Some(22),
             stderr: "gh: Unprocessable Entity (HTTP 422)\n\
                 {\"message\":\"Unprocessable Entity\",\"errors\":\

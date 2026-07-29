@@ -36,7 +36,7 @@ pub enum GlabCommandError {
 
 pub type GlabCommandResult<T> = std::result::Result<T, GlabCommandError>;
 
-pub trait GlabCommandRunner {
+pub trait GlabCommandRunner: Sync {
     fn run(&self, args: &[String]) -> GlabCommandResult<String>;
 
     fn run_with_stdin(&self, _args: &[String], _stdin: &str) -> GlabCommandResult<String> {
@@ -1240,7 +1240,7 @@ fn glab_debug_log(msg: &str) {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::sync::Mutex;
 
     use super::*;
     use crate::forge::submit::{DiffAnchor, GhSide, InlineComment, RangeAnchors};
@@ -1251,25 +1251,26 @@ mod tests {
 
     /// Mock runner that records (args, stdin) calls.
     struct RecordingRunner {
-        calls: RefCell<Vec<(Vec<String>, Option<String>)>>,
-        responses: RefCell<Vec<String>>,
+        calls: Mutex<Vec<(Vec<String>, Option<String>)>>,
+        responses: Mutex<Vec<String>>,
     }
 
     impl RecordingRunner {
         fn new_with_responses(responses: Vec<String>) -> Self {
             Self {
-                calls: RefCell::new(Vec::new()),
-                responses: RefCell::new(responses),
+                calls: Mutex::new(Vec::new()),
+                responses: Mutex::new(responses),
             }
         }
     }
 
     impl GlabCommandRunner for RecordingRunner {
         fn run(&self, args: &[String]) -> GlabCommandResult<String> {
-            self.calls.borrow_mut().push((args.to_vec(), None));
+            self.calls.lock().unwrap().push((args.to_vec(), None));
             let resp = self
                 .responses
-                .borrow_mut()
+                .lock()
+                .unwrap()
                 .drain(..1)
                 .next()
                 .unwrap_or_default();
@@ -1278,11 +1279,13 @@ mod tests {
 
         fn run_with_stdin(&self, args: &[String], stdin: &str) -> GlabCommandResult<String> {
             self.calls
-                .borrow_mut()
+                .lock()
+                .unwrap()
                 .push((args.to_vec(), Some(stdin.to_string())));
             let resp = self
                 .responses
-                .borrow_mut()
+                .lock()
+                .unwrap()
                 .drain(..1)
                 .next()
                 .unwrap_or_default();
@@ -1304,7 +1307,7 @@ mod tests {
             ))
             .unwrap();
 
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         assert_eq!(
             calls[0].0,
             vec![
@@ -1402,7 +1405,7 @@ mod tests {
             Some("ccccccc3333333333333333333333333333cccc")
         );
 
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         assert!(calls.iter().any(|(args, _)| args == &["api", "user"]));
         assert!(calls.iter().any(|(args, _)| {
             args.iter()
@@ -1497,7 +1500,7 @@ mod tests {
             comments: &[inline],
         };
         backend.create_review(&pr, request).unwrap();
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         // Should be one call (the inline comment)
         assert_eq!(calls.len(), 1);
         let (args, stdin) = &calls[0];
@@ -1559,7 +1562,7 @@ mod tests {
             comments: &[inline],
         };
         backend.create_review(&pr, request).unwrap();
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         assert_eq!(calls.len(), 1);
         let (_, stdin) = &calls[0];
         let body: serde_json::Value = serde_json::from_str(stdin.as_ref().unwrap()).unwrap();
@@ -1616,7 +1619,7 @@ mod tests {
             comments: &[inline],
         };
         backend.create_review(&pr, request).unwrap();
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         let (_, stdin) = &calls[0];
         let body: serde_json::Value = serde_json::from_str(stdin.as_ref().unwrap()).unwrap();
         let position = &body["position"];
@@ -1720,7 +1723,7 @@ mod tests {
             comments: &[inline],
         };
         backend.create_review(&pr, request).unwrap();
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         let (_, stdin) = &calls[0];
         let body: serde_json::Value = serde_json::from_str(stdin.as_ref().unwrap()).unwrap();
         let position = &body["position"];
@@ -1757,7 +1760,7 @@ mod tests {
             comments: &[inline],
         };
         backend.create_review(&pr, request).unwrap();
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         let (_, stdin) = &calls[0];
         let body: serde_json::Value = serde_json::from_str(stdin.as_ref().unwrap()).unwrap();
         let position = &body["position"];
@@ -1803,7 +1806,7 @@ mod tests {
         let response = backend.create_review(&pr, request).unwrap();
         assert_eq!(response.state, "COMMENTED");
 
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         // Discussion POST, then the approve call.
         assert_eq!(calls.len(), 2);
         let approve_args = &calls[1].0;
@@ -1849,7 +1852,7 @@ mod tests {
         let response = backend.create_review(&pr, request).unwrap();
         assert_eq!(response.state, "CHANGES_REQUESTED");
 
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         // body note POST, discussion POST, graphql mutation
         assert_eq!(calls.len(), 3);
 
@@ -1994,7 +1997,7 @@ mod tests {
         // the inline response (22), not left at 0.
         assert_eq!(response.id, 22, "inline draft note id should be reported");
 
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         assert_eq!(calls.len(), 2, "expected one body note and one inline note");
 
         // Every call must target a draft_notes endpoint; none may publish or
@@ -2070,7 +2073,7 @@ mod tests {
         };
         backend.create_review(&pr, request).unwrap();
 
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         for (args, _) in calls.iter() {
             assert!(
                 !args
@@ -2113,7 +2116,7 @@ mod tests {
         let response = backend.create_review(&pr, request).unwrap();
         assert_eq!(response.state, "COMMENTED");
 
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         assert_eq!(calls.len(), 2);
         assert!(calls[0].0[1].ends_with("/notes"));
         assert!(calls[1].0[1].ends_with("/discussions"));

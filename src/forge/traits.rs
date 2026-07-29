@@ -478,7 +478,10 @@ impl PullRequestInfo {
     }
 }
 
-pub trait ForgeBackend {
+/// `Sync` because the PR open path fans its independent fetches out across
+/// scoped threads sharing one backend. Every method takes `&self`; real
+/// backends are stateless CLI wrappers.
+pub trait ForgeBackend: Sync {
     fn list_pull_requests(&self, query: PullRequestListQuery) -> Result<PagedPullRequests>;
     fn get_pull_request(&self, target: PullRequestTarget) -> Result<PullRequestDetails>;
     /// Fetch PR metadata for the description panel. The default builds a
