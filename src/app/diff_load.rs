@@ -78,6 +78,7 @@ impl App {
             old_count: 0,
             new_start: 1,
             new_count: line_count,
+            needs_highlight: true,
         }];
         let content_hash = DiffFile::compute_content_hash(&hunks);
         let commit_msg_file = DiffFile {
@@ -91,7 +92,6 @@ impl App {
             is_binary: false,
             is_too_large: false,
             is_commit_message: true,
-            needs_highlight: false,
             content_hash,
         };
         self.diff_files.insert(0, commit_msg_file);

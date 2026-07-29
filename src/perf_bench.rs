@@ -171,6 +171,7 @@ fn build_fixture(files: usize, hunks_per_file: usize, lines_per_hunk: usize) -> 
                 old_count: lines_per_hunk as u32,
                 new_start: start,
                 new_count: lines_per_hunk as u32,
+                needs_highlight: true,
             });
         }
 
@@ -183,7 +184,6 @@ fn build_fixture(files: usize, hunks_per_file: usize, lines_per_hunk: usize) -> 
             is_binary: false,
             is_too_large: false,
             is_commit_message: false,
-            needs_highlight: false,
             content_hash,
         });
     }
@@ -258,6 +258,32 @@ fn time_frames(label: &str, app: &mut App, iters: usize, mut step: impl FnMut(&m
     s
 }
 
+/// Frame-time battery run against a fully built app.
+fn frame_battery(app: &mut App) {
+    time_frames("idle redraw", app, 50, |_| {});
+    time_frames("scroll by one", app, 200, |a| a.cursor_down(1));
+    time_frames("page down", app, 100, |a| a.cursor_down(HEIGHT as usize));
+
+    app.jump_to_file(0);
+    time_frames("next file", app, 50, |a| a.next_file());
+
+    app.cursor_to_top();
+    time_frames("search next", app, 50, |a| {
+        a.search_buffer = "mutated_".to_string();
+        a.last_search_pattern = Some("mutated_".to_string());
+        a.search_next_in_diff();
+    });
+
+    app.cursor_to_top();
+    app.set_diff_wrap(true);
+    time_frames("scroll by one (wrap)", app, 100, |a| a.cursor_down(1));
+    app.set_diff_wrap(false);
+
+    app.diff_view_mode = crate::app::DiffViewMode::SideBySide;
+    app.cursor_to_top();
+    time_frames("scroll by one (sbs)", app, 100, |a| a.cursor_down(1));
+}
+
 fn report(files: usize, hunks: usize, lines: usize) {
     let total_lines = files * hunks * lines;
     println!(
@@ -283,30 +309,7 @@ fn report(files: usize, hunks: usize, lines: usize) {
         println!("{:<28} {:>9.3?}", "initial frame", t.elapsed());
     }
 
-    time_frames("idle redraw", &mut app, 50, |_| {});
-    time_frames("scroll by one", &mut app, 200, |a| a.cursor_down(1));
-    time_frames("page down", &mut app, 100, |a| {
-        a.cursor_down(HEIGHT as usize)
-    });
-
-    app.jump_to_file(0);
-    time_frames("next file", &mut app, 50, |a| a.next_file());
-
-    app.cursor_to_top();
-    time_frames("search next", &mut app, 50, |a| {
-        a.search_buffer = "handler_".to_string();
-        a.last_search_pattern = Some("handler_".to_string());
-        a.search_next_in_diff();
-    });
-
-    app.cursor_to_top();
-    app.set_diff_wrap(true);
-    time_frames("scroll by one (wrap)", &mut app, 100, |a| a.cursor_down(1));
-    app.set_diff_wrap(false);
-
-    app.diff_view_mode = crate::app::DiffViewMode::SideBySide;
-    app.cursor_to_top();
-    time_frames("scroll by one (sbs)", &mut app, 100, |a| a.cursor_down(1));
+    frame_battery(&mut app);
 }
 
 #[test]
@@ -444,7 +447,17 @@ fn perf_bench_real_repo_load() {
     let mut app = build_app(files);
     println!("{:<28} {:>9.3?}", "App::build", t.elapsed());
 
-    time_frames("scroll by one", &mut app, 200, |a| a.cursor_down(1));
+    {
+        let backend = TestBackend::new(WIDTH, HEIGHT);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let t = Instant::now();
+        terminal
+            .draw(|f| crate::ui::render(f, &mut app))
+            .expect("draw");
+        println!("{:<28} {:>9.3?}", "initial frame", t.elapsed());
+    }
+
+    frame_battery(&mut app);
 }
 
 /// Lazy highlighting must not change what lands on screen: render the real
@@ -473,8 +486,13 @@ fn lazy_highlight_renders_identically_to_eager() {
 
     let mut eager_files = files;
     for file in &mut eager_files {
-        highlighter.highlight_diff_file(file);
-        file.needs_highlight = false;
+        let path = file.new_path.clone().or_else(|| file.old_path.clone());
+        for hunk in &mut file.hunks {
+            if let Some(path) = path.as_deref() {
+                highlighter.highlight_hunk(path, hunk);
+            }
+            hunk.needs_highlight = false;
+        }
     }
     let mut eager = build_app(eager_files);
 
@@ -496,4 +514,38 @@ fn lazy_highlight_renders_identically_to_eager() {
         eager.cursor_down(HEIGHT as usize / 2);
     }
     println!("\n{compared} frames identical between lazy and eager highlighting");
+}
+
+/// Worst case for per-file laziness: one very large file, whose whole
+/// highlight cost lands on the frame that first shows it.
+#[test]
+#[ignore = "timing harness; run explicitly with --ignored"]
+fn perf_bench_single_huge_file() {
+    let mut files = build_fixture(2, 200, 100);
+    for file in &mut files {
+        for hunk in &mut file.hunks {
+            for line in &mut hunk.lines {
+                line.highlighted_spans = None;
+            }
+        }
+    }
+    let lines: usize = files[0].hunks.iter().map(|h| h.lines.len()).sum();
+    println!("\n=== single file of {lines} diff lines ===");
+
+    let mut app = build_app(files);
+    let backend = TestBackend::new(WIDTH, HEIGHT);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+
+    let t = Instant::now();
+    terminal
+        .draw(|f| crate::ui::render(f, &mut app))
+        .expect("draw");
+    println!("{:<28} {:>9.3?}", "first frame on file 1", t.elapsed());
+
+    app.next_file();
+    let t = Instant::now();
+    terminal
+        .draw(|f| crate::ui::render(f, &mut app))
+        .expect("draw");
+    println!("{:<28} {:>9.3?}", "first frame on file 2", t.elapsed());
 }

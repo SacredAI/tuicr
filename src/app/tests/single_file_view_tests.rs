@@ -53,6 +53,7 @@ fn hunk(start: u32, count: u32) -> DiffHunk {
         old_count: count,
         new_start: start,
         new_count: count,
+        needs_highlight: true,
     }
 }
 
@@ -66,7 +67,6 @@ fn file(path: &str, hunks: Vec<DiffHunk>) -> DiffFile {
         is_binary: false,
         is_too_large: false,
         is_commit_message: false,
-        needs_highlight: false,
         content_hash,
     }
 }

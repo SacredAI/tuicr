@@ -265,6 +265,7 @@ mod tests {
             old_count: 1,
             new_start,
             new_count: 1,
+            needs_highlight: true,
         }
     }
 
@@ -278,7 +279,6 @@ mod tests {
             is_binary: false,
             is_too_large: false,
             is_commit_message: false,
-            needs_highlight: false,
             content_hash,
         }
     }

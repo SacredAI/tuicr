@@ -484,6 +484,21 @@ pub fn annotation_file_idx(annotation: &AnnotatedLine) -> Option<usize> {
     }
 }
 
+/// The `(file_idx, hunk_idx)` an annotation draws from, for annotations that
+/// render hunk content. Used to find the hunks a viewport actually needs.
+pub fn annotation_hunk(annotation: &AnnotatedLine) -> Option<(usize, usize)> {
+    match annotation {
+        AnnotatedLine::HunkHeader { file_idx, hunk_idx }
+        | AnnotatedLine::DiffLine {
+            file_idx, hunk_idx, ..
+        }
+        | AnnotatedLine::SideBySideLine {
+            file_idx, hunk_idx, ..
+        } => Some((*file_idx, *hunk_idx)),
+        _ => None,
+    }
+}
+
 /// Search `line_annotations` for the annotation whose line number on the given
 /// `side` best matches `target_lineno` within the file identified by
 /// `current_file`. `side` selects whether to compare against `new_lineno`

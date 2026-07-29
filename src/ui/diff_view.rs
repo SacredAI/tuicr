@@ -263,16 +263,16 @@ pub(super) fn paint_binary_images(
     }
 }
 
-/// Syntax-highlight the files backing the rows at and around the viewport,
+/// Syntax-highlight the hunks backing the rows at and around the viewport,
 /// which VCS backends deliberately leave unhighlighted.
 ///
 /// The window extends a full viewport either side of the visible rows so that
 /// wrapping, and the scroll adjustment Comment mode makes after building, can
-/// never expose a row whose file was skipped.
-pub(super) fn highlight_files_near_viewport(app: &mut App, inner: Rect) {
+/// never expose a row whose hunk was skipped.
+pub(super) fn highlight_hunks_near_viewport(app: &mut App, inner: Rect) {
     let height = inner.height as usize;
     let offset = app.diff_state.scroll_offset;
-    app.highlight_files_in_range(
+    app.highlight_hunks_in_range(
         offset.saturating_sub(height),
         offset.saturating_add(height.saturating_mul(2)),
     );

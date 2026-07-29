@@ -1,26 +1,29 @@
 use super::*;
 
 impl App {
-    /// Syntax-highlight every diff file with an annotation in the logical line
+    /// Syntax-highlight every hunk with an annotation in the logical line
     /// range `[start, end)` that a VCS backend left unhighlighted.
     ///
-    /// Syntect costs tens of microseconds per line, so highlighting a few
-    /// hundred changed files up front stalls startup for seconds. Backends
-    /// hand over unhighlighted files and each one is highlighted the first
-    /// time it scrolls into view instead.
-    pub(crate) fn highlight_files_in_range(&mut self, start: usize, end: usize) {
+    /// Syntect costs tens of microseconds per line, so highlighting a whole
+    /// review up front stalls startup for seconds. Backends hand over
+    /// unhighlighted hunks and each is highlighted the first time it scrolls
+    /// into view instead. Working per hunk rather than per file keeps the
+    /// cost bounded by the viewport, so a single very large file cannot stall
+    /// the frame that first shows it.
+    pub(crate) fn highlight_hunks_in_range(&mut self, start: usize, end: usize) {
         let end = end.min(self.line_annotations.len());
         if start >= end {
             return;
         }
 
-        let mut pending: Vec<usize> = self.line_annotations[start..end]
+        let mut pending: Vec<(usize, usize)> = self.line_annotations[start..end]
             .iter()
-            .filter_map(annotation_file_idx)
-            .filter(|idx| {
+            .filter_map(annotation_hunk)
+            .filter(|(file_idx, hunk_idx)| {
                 self.diff_files
-                    .get(*idx)
-                    .is_some_and(|file| file.needs_highlight)
+                    .get(*file_idx)
+                    .and_then(|file| file.hunks.get(*hunk_idx))
+                    .is_some_and(|hunk| hunk.needs_highlight)
             })
             .collect();
         pending.dedup();
@@ -29,10 +32,23 @@ impl App {
         }
 
         let highlighter = self.theme.syntax_highlighter();
-        for idx in pending {
-            let file = &mut self.diff_files[idx];
-            highlighter.highlight_diff_file(file);
-            file.needs_highlight = false;
+        for (file_idx, hunk_idx) in pending {
+            let Some(file) = self.diff_files.get_mut(file_idx) else {
+                continue;
+            };
+            // Container grammars (Vue, Svelte, …) get their spans from the
+            // full-file pass at load; per-hunk highlighting would be weaker.
+            let path = file.new_path.clone().or_else(|| file.old_path.clone());
+            let Some(hunk) = file.hunks.get_mut(hunk_idx) else {
+                continue;
+            };
+            match path {
+                Some(path) if !crate::syntax::needs_full_file_highlight(&path) => {
+                    highlighter.highlight_hunk(&path, hunk);
+                }
+                _ => {}
+            }
+            hunk.needs_highlight = false;
         }
     }
 

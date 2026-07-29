@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use std::path::Path;
 use two_face::theme::EmbeddedThemeName;
 
-use crate::model::diff_types::{DiffFile, DiffHunk, LineOrigin};
+use crate::model::diff_types::{DiffHunk, LineOrigin};
 
 /// A single line of highlighted spans (style + text pairs).
 pub(crate) type HighlightedSpans = Vec<(Style, String)>;
@@ -115,27 +115,10 @@ impl SyntaxHighlighter {
         }
     }
 
-    /// Populate `highlighted_spans` for every line of every hunk in `file`.
-    ///
-    /// Container grammars are skipped: their spans come from the full-file
-    /// pass in `crate::vcs`, which would otherwise be overwritten with the
-    /// weaker per-hunk result.
-    pub(crate) fn highlight_diff_file(&self, file: &mut DiffFile) {
-        let Some(path) = file.new_path.clone().or_else(|| file.old_path.clone()) else {
-            return;
-        };
-        if needs_full_file_highlight(&path) {
-            return;
-        }
-        for hunk in &mut file.hunks {
-            self.highlight_hunk(&path, hunk);
-        }
-    }
-
     /// Highlight one hunk. A hunk is the largest contiguous run of each side
     /// the diff gives us, and syntect carries parse state along a run, so the
     /// old and new sides are highlighted as whole sequences.
-    fn highlight_hunk(&self, path: &Path, hunk: &mut DiffHunk) {
+    pub(crate) fn highlight_hunk(&self, path: &Path, hunk: &mut DiffHunk) {
         let contents: Vec<String> = hunk.lines.iter().map(|l| l.content.clone()).collect();
         let origins: Vec<LineOrigin> = hunk.lines.iter().map(|l| l.origin).collect();
         let sequences = Self::split_diff_lines_for_highlighting(&contents, &origins);
@@ -522,6 +505,7 @@ mod tests {
                 old_count: 2,
                 new_start: 1,
                 new_count: 2,
+                needs_highlight: true,
             };
 
             let mut actual = make_hunk();

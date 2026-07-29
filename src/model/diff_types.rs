@@ -99,6 +99,10 @@ pub struct DiffHunk {
     pub new_start: u32,
     /// Number of lines from the new file in this hunk
     pub new_count: u32,
+    /// Set by VCS backends, which leave `highlighted_spans` empty so a large
+    /// diff does not pay for syntect up front. The renderer highlights each
+    /// hunk the first time it scrolls into view and clears this.
+    pub needs_highlight: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -111,10 +115,6 @@ pub struct DiffFile {
     pub is_too_large: bool,
     pub is_commit_message: bool,
     pub content_hash: u64,
-    /// Set by VCS backends, which leave `highlighted_spans` empty so a large
-    /// diff does not pay for syntect up front. The renderer highlights each
-    /// file the first time it scrolls into view and clears this.
-    pub needs_highlight: bool,
 }
 
 impl DiffHunk {

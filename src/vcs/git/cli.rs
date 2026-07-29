@@ -857,6 +857,7 @@ fn build_untracked_diff_file(
         old_count: 0,
         new_start: 1,
         new_count,
+        needs_highlight: true,
     }];
     let content_hash = DiffFile::compute_content_hash(&hunks);
 

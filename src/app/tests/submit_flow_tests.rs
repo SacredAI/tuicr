@@ -63,6 +63,7 @@ fn make_pr_app_with_single_modified_file(file_path: &str) -> App {
             old_count: 0,
             new_start: 1,
             new_count: 0,
+            needs_highlight: true,
             lines: vec![
                 DiffLine {
                     origin: LineOrigin::Context,
@@ -85,7 +86,6 @@ fn make_pr_app_with_single_modified_file(file_path: &str) -> App {
         is_binary: false,
         is_too_large: false,
         is_commit_message: false,
-        needs_highlight: false,
         content_hash: 0,
     };
     let pr_source = PullRequestDiffSource {

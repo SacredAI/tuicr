@@ -60,6 +60,7 @@ fn build_scroll_app(n: usize, viewport: usize, scroll_offset_config: usize) -> A
         old_count: n as u32,
         new_start: 1,
         new_count: n as u32,
+        needs_highlight: true,
     };
 
     let file = DiffFile {
@@ -70,7 +71,6 @@ fn build_scroll_app(n: usize, viewport: usize, scroll_offset_config: usize) -> A
         is_binary: false,
         is_too_large: false,
         is_commit_message: false,
-        needs_highlight: false,
         content_hash: 0,
     };
 

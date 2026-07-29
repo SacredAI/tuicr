@@ -45,7 +45,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
     app.diff_state.viewport_height = inner.height as usize;
     app.diff_inner_area = Some(inner);
 
-    crate::ui::diff_view::highlight_files_near_viewport(app, inner);
+    crate::ui::diff_view::highlight_hunks_near_viewport(app, inner);
 
     // Reset comment input annotation offset (will be set if a comment input box is rendered)
     app.comment_input_annotation_offset = None;
@@ -1596,6 +1596,7 @@ mod remote_comments_snapshot_tests {
             old_count: 1,
             new_start: 1,
             new_count: 2,
+            needs_highlight: true,
         };
         let hunks = vec![hunk];
         let content_hash = DiffFile::compute_content_hash(&hunks);
@@ -1607,7 +1608,6 @@ mod remote_comments_snapshot_tests {
             is_binary: false,
             is_too_large: false,
             is_commit_message: false,
-            needs_highlight: false,
             content_hash,
         }
     }
@@ -1623,7 +1623,6 @@ mod remote_comments_snapshot_tests {
             is_binary: false,
             is_too_large: false,
             is_commit_message: false,
-            needs_highlight: false,
             content_hash,
         }
     }
@@ -1780,6 +1779,7 @@ mod remote_comments_snapshot_tests {
             old_count: 0,
             new_start: 1,
             new_count,
+            needs_highlight: true,
         }];
         let content_hash = DiffFile::compute_content_hash(&hunks);
         DiffFile {
@@ -1790,7 +1790,6 @@ mod remote_comments_snapshot_tests {
             is_binary: false,
             is_too_large: false,
             is_commit_message: true,
-            needs_highlight: false,
             content_hash,
         }
     }
@@ -2015,6 +2014,7 @@ mod remote_comments_snapshot_tests {
             old_count: 0,
             new_start: 1,
             new_count: 1,
+            needs_highlight: true,
         };
         let hunks = vec![hunk];
         let content_hash = DiffFile::compute_content_hash(&hunks);
@@ -2026,7 +2026,6 @@ mod remote_comments_snapshot_tests {
             is_binary: false,
             is_too_large: false,
             is_commit_message: false,
-            needs_highlight: false,
             content_hash,
         };
         let mut app = make_revision_app(vec![file]);
@@ -2234,6 +2233,7 @@ mod remote_comments_snapshot_tests {
             old_count: 0,
             new_start: 1,
             new_count: 1,
+            needs_highlight: true,
         };
         let hunks = vec![hunk];
         let content_hash = DiffFile::compute_content_hash(&hunks);
@@ -2246,7 +2246,6 @@ mod remote_comments_snapshot_tests {
             is_binary: false,
             is_too_large: false,
             is_commit_message: false,
-            needs_highlight: false,
             content_hash,
         };
         let mut app = make_revision_app(vec![file]);

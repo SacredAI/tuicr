@@ -596,6 +596,7 @@ mod tests {
             old_count: 0,
             new_start: 1,
             new_count: 0,
+            needs_highlight: true,
             lines,
         }
     }
@@ -609,7 +610,6 @@ mod tests {
             is_binary: false,
             is_too_large: false,
             is_commit_message: false,
-            needs_highlight: false,
             content_hash: 0,
         }
     }

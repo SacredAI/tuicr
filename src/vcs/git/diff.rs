@@ -317,7 +317,6 @@ fn parse_diff(diff: &Diff) -> Result<Vec<DiffFile>> {
             is_binary,
             is_too_large,
             is_commit_message: false,
-            needs_highlight: true,
             content_hash,
         });
     }
@@ -387,6 +386,7 @@ fn parse_hunks(diff: &Diff, delta_idx: usize) -> Result<Vec<DiffHunk>> {
                 old_count,
                 new_start,
                 new_count,
+                needs_highlight: true,
             });
         }
     }
