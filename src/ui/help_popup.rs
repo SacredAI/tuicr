@@ -704,6 +704,13 @@ pub fn render_help(frame: &mut Frame, app: &mut App) {
         ]),
         Line::from(vec![
             Span::styled(
+                "  :open     ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Open the active GitHub PR in your browser"),
+        ]),
+        Line::from(vec![
+            Span::styled(
                 "  :clip     ",
                 Style::default().add_modifier(Modifier::BOLD),
             ),

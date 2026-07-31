@@ -7,6 +7,7 @@ use crate::app::{
 };
 use crate::forge::remote_comments::PrCommentsVisibility;
 use crate::forge::submit::SubmitEvent;
+use crate::forge::traits::ForgeKind;
 use crate::input::Action;
 use crate::model::{ClearScope, LineSide};
 use crate::output::{copy_text_to_clipboard, export_to_clipboard, generate_export_content};
@@ -31,6 +32,7 @@ const COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec::new(&["x", "wq"], CommandKind::WriteQuit),
     CommandSpec::new(&["e", "reload"], CommandKind::Reload),
     CommandSpec::new(&["edit"], CommandKind::Edit),
+    CommandSpec::new(&["open"], CommandKind::OpenPullRequest),
     CommandSpec::new(&["clip", "export"], CommandKind::Export),
     CommandSpec::new(&["copy-url"], CommandKind::CopyUrl),
     CommandSpec::new(
@@ -131,6 +133,7 @@ enum CommandKind {
     WriteQuit,
     Reload,
     Edit,
+    OpenPullRequest,
     Export,
     CopyUrl,
     Clear(ClearScope),
@@ -866,6 +869,10 @@ fn dispatch_command(app: &mut App, kind: CommandKind) -> CommandAfterDispatch {
             app.queue_editor_for_focused_item();
             CommandAfterDispatch::ExitCommandMode
         }
+        CommandKind::OpenPullRequest => {
+            open_pull_request(app);
+            CommandAfterDispatch::ExitCommandMode
+        }
         CommandKind::Export => {
             handle_export(app);
             CommandAfterDispatch::ExitCommandMode
@@ -985,6 +992,22 @@ fn dispatch_command(app: &mut App, kind: CommandKind) -> CommandAfterDispatch {
             set_remote_comments_visibility(app, visibility);
             CommandAfterDispatch::ExitCommandMode
         }
+    }
+}
+
+fn open_pull_request(app: &mut App) {
+    let app::DiffSource::PullRequest(pr) = &app.diff_source else {
+        app.set_warning(":open only applies in GitHub PR mode");
+        return;
+    };
+    if pr.key.repository.kind != ForgeKind::GitHub {
+        app.set_warning(":open only applies to GitHub PRs");
+        return;
+    }
+
+    match crate::forge::github::gh::open_pull_request_in_browser(&pr.url, &pr.key.repository.host) {
+        Ok(()) => app.set_message("Opened PR in browser"),
+        Err(error) => app.set_error(format!("Failed to open PR: {error}")),
     }
 }
 

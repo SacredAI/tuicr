@@ -164,6 +164,7 @@ Repository-managed agent integrations:
 6. **Persistence**: active TUI sessions, comment submit, and `:w` save the session JSON to `~/.local/share/tuicr/reviews/`; library callers use `ReviewStore`. Open TUI sessions are also recorded in `active_sessions.json` beside `index.json` with pid, slug, path, and last-seen timestamp. TUI-created empty session files are deleted on normal exit if they still contain no comments and no reviewed files.
 7. **Reload diff/session**: `:e` reloads persisted comments/review state, then re-runs VCS diff loading and reapplies `.tuicrignore` filtering to refresh displayed files
 8. **Export**: `:clip` (alias `:export`) calls `export_to_clipboard()`, generating markdown and copying it to the clipboard (or stdout with `--stdout` flag)
+9. **Open GitHub PR**: `:open` passes the active PR URL to `gh pr view --web`
 
 ### Important Implementation Details
 

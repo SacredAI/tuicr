@@ -226,6 +226,7 @@ In command mode,
 | `:w` | Save session |
 | `:e` (`:reload`) | Reload diff files |
 | `:edit` | Open focused file in `$EDITOR` |
+| `:open` | Open the active GitHub PR in your browser |
 | `:clip` (`:export`) | Copy review to clipboard |
 | `:copy-url` | Copy the open PR URL to clipboard (PR mode) |
 | `:summary` | Show all pending local-draft comments; `j`/`k` select and `Enter` jumps |

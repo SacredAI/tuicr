@@ -111,6 +111,26 @@ impl From<CommandOutputError> for GhCommandError {
     }
 }
 
+pub fn open_pull_request_in_browser(url: &str, host: &str) -> Result<()> {
+    open_pull_request_in_browser_with_runner(&SystemGhRunner, url, host)
+}
+
+fn open_pull_request_in_browser_with_runner<R: GhCommandRunner>(
+    runner: &R,
+    url: &str,
+    host: &str,
+) -> Result<()> {
+    runner
+        .run(&[
+            "pr".to_string(),
+            "view".to_string(),
+            url.to_string(),
+            "--web".to_string(),
+        ])
+        .map(|_| ())
+        .map_err(|error| map_gh_error(error, host))
+}
+
 /// Read a git blob from a checkout at `repo_root` using `git show <sha>:<path>`.
 /// Returns `None` if the object is missing or the command fails for any reason.
 fn read_blob_with_repo(repo_root: &Path, sha: &str, path: &Path) -> Option<String> {
@@ -1708,6 +1728,19 @@ Match host github-work
                 "--json",
                 PR_LIST_JSON_FIELDS,
             ]
+        );
+    }
+
+    #[test]
+    fn opens_pull_request_url_in_browser() {
+        let runner = FakeGhRunner::default();
+        let url = "https://github.com/agavra/tuicr/pull/125";
+
+        open_pull_request_in_browser_with_runner(&runner, url, "github.com").unwrap();
+
+        assert_eq!(
+            runner.calls.lock().unwrap()[0],
+            vec!["pr", "view", url, "--web"]
         );
     }
 
