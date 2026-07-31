@@ -283,6 +283,8 @@ These are non-obvious things the implementation chain hit. Worth preserving for 
 
 14. **Comments are commit-scoped via `Comment::commit_id`.** When the inline commit selector shows exactly one commit, `App::save_comment` stamps that commit's SHA on the comment. Comments with `commit_id = Some(sha)` are hidden when a different commit (or a subset not containing `sha`) is selected; `commit_id = None` (legacy, review-level, or made against the full cumulative diff) is always visible. The filter runs in `rebuild_annotations`, both diff renderers, the comment navigator (via filtered annotations), and the submit preflight. `App::comment_visible(&Comment)` is the single predicate. `AnnotatedLine::LineComment`/`FileComment` `comment_idx` is the **absolute** index into the stored `Vec`/`HashMap` value — `delete_comment_at_cursor` and `enter_edit_mode` must look it up directly, not re-count by side.
 
+15. **Large GitHub PRs need the compare fallback.** `gh pr diff` returns HTTP 406 above GitHub's 20,000-line limit. Retry only that error through `gh api` with the diff media type against `compare/<base>...<head>`; the compare response stays a single cumulative diff and does not add per-file pagination round trips.
+
 ### Keeping Docs Updated
 
 When adding user-facing features, update the relevant documentation:

@@ -363,18 +363,25 @@ where
         // returns the single cumulative diff. Hard-won lesson; see the
         // duplicate-files-in-list bug.
         let metadata = self.pull_request_file_metadata(pr)?;
-        let patch = self.run_gh(
-            vec![
-                "pr".to_string(),
-                "diff".to_string(),
-                pr.number.to_string(),
-                "--repo".to_string(),
-                gh_repo_arg(&pr.repository),
-                "--color".to_string(),
-                "never".to_string(),
-            ],
-            &pr.repository.host,
-        )?;
+        let args = vec![
+            "pr".to_string(),
+            "diff".to_string(),
+            pr.number.to_string(),
+            "--repo".to_string(),
+            gh_repo_arg(&pr.repository),
+            "--color".to_string(),
+            "never".to_string(),
+        ];
+        let patch = match self.runner.run(&args) {
+            Ok(diff) => diff,
+            // GitHub caps `gh pr diff` at 20,000 lines. The compare endpoint
+            // returns the same cumulative base-to-head patch and avoids
+            // per-file pagination, so use it only for this specific limit.
+            Err(error) if is_too_large_pr_diff_error(&error) => {
+                self.get_compare_diff(pr, &pr.base_sha, &pr.head_sha)?
+            }
+            Err(error) => return Err(map_gh_error(error, &pr.repository.host)),
+        };
         pair_metadata_with_patch(metadata, patch.as_bytes())
     }
 
@@ -996,6 +1003,16 @@ fn gh_repo_arg(repository: &ForgeRepository) -> String {
     } else {
         format!("{}/{}", repository.host, repository.slug())
     }
+}
+
+fn is_too_large_pr_diff_error(error: &GhCommandError) -> bool {
+    let GhCommandError::Failed { stderr, .. } = error else {
+        return false;
+    };
+    let message = stderr.to_ascii_lowercase();
+    message.contains("pullrequest.diff too_large")
+        || (message.contains("diff exceeded the maximum number of lines")
+            && message.contains("http 406"))
 }
 
 fn map_gh_error(error: GhCommandError, host: &str) -> TuicrError {

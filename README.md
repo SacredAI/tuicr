@@ -137,7 +137,8 @@ When you're done reviewing, send your comments wherever the work continues.
 
 `:submit` opens a picker for Comment, Approve, Request changes, or Draft. Inline comments land
 on the right lines as a real PR review. Review-level comments become the review summary.
-Requires `gh` authenticated to the repo.
+Requires `gh` authenticated to the repo. Large PRs that exceed GitHub's normal diff limit use
+GitHub's base-to-head compare endpoint automatically.
 
 ### To GitLab
 
