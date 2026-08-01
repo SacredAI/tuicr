@@ -218,6 +218,9 @@ merge_method = "rebase"
 The `:submit` picker has an "Approve & Merge" row for open pull requests. It
 submits an ordinary approving review and then merges, and it always asks for
 confirmation first — unlike the other rows, where picking is the confirmation.
+Before approval, it checks every unchecked Markdown task below a line that
+starts with `## Reviewer` in the pull request body. It does not change tasks
+above that heading. If the body update fails, it does not submit the approval.
 If the PR head moved since you opened the review, the merge is refused until
 you reload with `:e`: merging a revision you have not read is worse than
 commenting on one.

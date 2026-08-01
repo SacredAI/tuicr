@@ -1,5 +1,29 @@
 use super::*;
 
+pub(in crate::app) fn publish_review(
+    backend: &dyn ForgeBackend,
+    details: &crate::forge::traits::PullRequestDetails,
+    request: crate::forge::traits::CreateReviewRequest<'_>,
+    and_merge: bool,
+    merge_method: crate::config::MergeMethod,
+) -> std::result::Result<PrSubmitResult, String> {
+    if and_merge && let Some(body) = crate::forge::submit::check_reviewer_items(&details.body) {
+        backend
+            .update_pull_request_body(details, &body)
+            .map_err(|error| error.to_string())?;
+    }
+
+    let review = backend
+        .create_review(details, request)
+        .map_err(|error| error.to_string())?;
+    let merge = and_merge.then(|| {
+        backend
+            .merge_pull_request(details, merge_method)
+            .map_err(|error| error.to_string())
+    });
+    Ok(PrSubmitResult { review, merge })
+}
+
 impl App {
     pub fn start_submit_with_general_comment(
         &mut self,
@@ -461,28 +485,18 @@ impl App {
                 pr_number.to_string(),
             );
             let result = match backend.get_pull_request(target) {
-                Ok(details) => backend
-                    .create_review(
-                        &details,
-                        CreateReviewRequest {
-                            event,
-                            commit_id: &commit_id,
-                            body: &body,
-                            comments: &mappable,
-                        },
-                    )
-                    .map_err(|e| e.to_string())
-                    .map(|review| {
-                        // The review is published by this point, so a merge
-                        // failure travels alongside it rather than replacing
-                        // it — see `PrSubmitResult`.
-                        let merge = and_merge.then(|| {
-                            backend
-                                .merge_pull_request(&details, merge_method)
-                                .map_err(|e| e.to_string())
-                        });
-                        PrSubmitResult { review, merge }
-                    }),
+                Ok(details) => publish_review(
+                    backend.as_ref(),
+                    &details,
+                    CreateReviewRequest {
+                        event,
+                        commit_id: &commit_id,
+                        body: &body,
+                        comments: &mappable,
+                    },
+                    and_merge,
+                    merge_method,
+                ),
                 Err(e) => Err(e.to_string()),
             };
             let _ = tx.send(PrSubmitEvent::Done {

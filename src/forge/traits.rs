@@ -557,6 +557,13 @@ pub trait ForgeBackend: Sync {
         request: CreateReviewRequest<'_>,
     ) -> Result<GhCreateReviewResponse>;
 
+    /// Replace the pull request's Markdown body.
+    fn update_pull_request_body(&self, _pr: &PullRequestDetails, _body: &str) -> Result<()> {
+        Err(crate::error::TuicrError::UnsupportedOperation(
+            "This forge cannot update pull request bodies".to_string(),
+        ))
+    }
+
     /// Merge the pull request using `method`.
     ///
     /// When the only obstacle is checks that have not finished, the backend

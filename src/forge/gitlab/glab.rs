@@ -793,6 +793,28 @@ where
         })
     }
 
+    fn update_pull_request_body(&self, pr: &PullRequestDetails, body: &str) -> Result<()> {
+        let project = gl_project_path(&pr.repository.owner, &pr.repository.name);
+        let endpoint = format!("projects/{project}/merge_requests/{}", pr.number);
+        let payload = serde_json::to_string(&serde_json::json!({ "description": body }))?;
+        let mut args = vec![
+            "api".to_string(),
+            endpoint,
+            "--method".to_string(),
+            "PUT".to_string(),
+            "--header".to_string(),
+            "Content-Type: application/json".to_string(),
+            "--input".to_string(),
+            "-".to_string(),
+        ];
+        args.extend(Self::api_hostname_args(&pr.repository));
+
+        self.runner
+            .run_with_stdin(&args, &payload)
+            .map(|_| ())
+            .map_err(|error| map_glab_error(error, &pr.repository.host))
+    }
+
     fn merge_pull_request(
         &self,
         pr: &PullRequestDetails,
@@ -1880,6 +1902,27 @@ mod tests {
                 .any(|a| a == "projects/owner%2Frepo/merge_requests/42/approve"),
             "expected approve endpoint, got {approve_args:?}"
         );
+    }
+
+    #[test]
+    fn should_update_merge_request_description_with_stdin_payload() {
+        let repo = ForgeRepository::gitlab("gitlab.com", "owner", "repo");
+        let pr = make_pr_details(repo.clone());
+        let runner = RecordingRunner::new_with_responses(vec![String::new()]);
+        let backend = GitLabGlabBackend::with_runner(Some(repo), runner);
+
+        backend
+            .update_pull_request_body(&pr, "## Reviewer\n- [x] reviewed\n")
+            .unwrap();
+
+        let calls = backend.runner.calls.lock().unwrap();
+        let (args, stdin) = calls.last().expect("description update call");
+        assert_eq!(args[0], "api");
+        assert!(args[1].contains("projects/owner%2Frepo/merge_requests/42"));
+        assert!(args.windows(2).any(|args| args == ["--method", "PUT"]));
+        let payload: serde_json::Value =
+            serde_json::from_str(stdin.as_deref().expect("stdin payload")).unwrap();
+        assert_eq!(payload["description"], "## Reviewer\n- [x] reviewed\n");
     }
 
     #[test]

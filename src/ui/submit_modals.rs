@@ -175,7 +175,7 @@ pub fn render_submit_confirm(frame: &mut Frame, app: &App) {
     )));
     if state.and_merge {
         lines.push(Line::from(format!(
-            "Then merge: {method}",
+            "Then: check reviewer checklist; merge: {method}",
             method = app.forge_config.merge_method.human_label()
         )));
     }

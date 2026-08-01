@@ -60,6 +60,27 @@ pub enum MergeOutcome {
     AutoMergeArmed,
 }
 
+/// Check every unchecked task after the `## Reviewer` heading.
+pub fn check_reviewer_items(body: &str) -> Option<String> {
+    let mut in_reviewer_section = false;
+    let mut changed = false;
+    let mut checked = String::with_capacity(body.len());
+
+    for line in body.split_inclusive('\n') {
+        if line.starts_with("## Reviewer") {
+            in_reviewer_section = true;
+            checked.push_str(line);
+        } else if in_reviewer_section && line.contains("- [ ]") {
+            checked.push_str(&line.replace("- [ ]", "- [x]"));
+            changed = true;
+        } else {
+            checked.push_str(line);
+        }
+    }
+
+    changed.then_some(checked)
+}
+
 impl MergeOutcome {
     pub fn human_label(self) -> &'static str {
         match self {
@@ -660,6 +681,21 @@ mod tests {
     use crate::model::comment::{Comment, CommentType, LineContext, LineRange, LineSide};
     use crate::model::diff_types::{DiffHunk, DiffLine, FileStatus, LineOrigin};
     use std::path::PathBuf;
+
+    #[test]
+    fn should_check_only_tasks_below_the_reviewer_heading() {
+        let body = "## Author\n- [ ] author task\n\n## Reviewer\n- [ ] first\n  - [ ] nested\n- [x] done\n";
+
+        assert_eq!(
+            check_reviewer_items(body),
+            Some(
+                "## Author\n- [ ] author task\n\n## Reviewer\n- [x] first\n  - [x] nested\n- [x] done\n"
+                    .to_string()
+            )
+        );
+        assert_eq!(check_reviewer_items("## Reviewer\n- [x] done"), None);
+        assert_eq!(check_reviewer_items("## Author\n- [ ] author task\n"), None);
+    }
 
     #[test]
     fn should_tell_an_unsatisfied_branch_rule_apart_from_a_wait() {

@@ -618,6 +618,31 @@ where
         parse_create_review_response(&output)
     }
 
+    fn update_pull_request_body(&self, pr: &PullRequestDetails, body: &str) -> Result<()> {
+        let endpoint = format!(
+            "repos/{}/{}/pulls/{}",
+            pr.repository.owner, pr.repository.name, pr.number
+        );
+        let payload = serde_json::to_string(&serde_json::json!({ "body": body }))?;
+        let mut args = vec![
+            "api".to_string(),
+            endpoint,
+            "--method".to_string(),
+            "PATCH".to_string(),
+            "--input".to_string(),
+            "-".to_string(),
+        ];
+        if pr.repository.host != DEFAULT_GITHUB_HOST {
+            args.push("--hostname".to_string());
+            args.push(pr.repository.host.clone());
+        }
+
+        self.runner
+            .run_with_stdin(&args, &payload)
+            .map(|_| ())
+            .map_err(|error| map_gh_error(error, &pr.repository.host))
+    }
+
     fn merge_pull_request(
         &self,
         pr: &PullRequestDetails,
@@ -2192,6 +2217,27 @@ Match host github-work
             payload["comments"][0].get("comment_id").is_none(),
             "comment_id should not leak into the JSON payload"
         );
+    }
+
+    #[test]
+    fn should_update_pull_request_body_with_stdin_payload() {
+        let runner = FakeGhRunner::default();
+        let backend = GitHubGhBackend::with_runner(Some(repo()), runner);
+        let details = backend
+            .get_pull_request(parse_pull_request_target("125").unwrap())
+            .unwrap();
+
+        backend
+            .update_pull_request_body(&details, "## Reviewer\n- [x] reviewed\n")
+            .unwrap();
+
+        let stdin_calls = backend.runner.stdin_calls.lock().unwrap();
+        let (args, stdin) = stdin_calls.last().expect("body update call");
+        assert_eq!(args[0], "api");
+        assert_eq!(args[1], "repos/agavra/tuicr/pulls/125");
+        assert!(args.windows(2).any(|args| args == ["--method", "PATCH"]));
+        let payload: serde_json::Value = serde_json::from_str(stdin).unwrap();
+        assert_eq!(payload["body"], "## Reviewer\n- [x] reviewed\n");
     }
 
     #[test]
