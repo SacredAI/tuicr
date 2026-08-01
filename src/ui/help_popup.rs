@@ -831,7 +831,7 @@ pub fn render_help(frame: &mut Frame, app: &mut App) {
                 "  :submit comment",
                 Style::default().add_modifier(Modifier::BOLD),
             ),
-            Span::raw("  Submit a COMMENT review (skips the picker, shows confirm modal)"),
+            Span::raw("  Add an optional general comment, then submit a COMMENT review"),
         ]),
         Line::from(vec![
             Span::styled(
@@ -845,7 +845,7 @@ pub fn render_help(frame: &mut Frame, app: &mut App) {
                 "  :submit request-changes",
                 Style::default().add_modifier(Modifier::BOLD),
             ),
-            Span::raw("  Submit a REQUEST_CHANGES review to the forge"),
+            Span::raw("  Add an optional general comment, then request changes"),
         ]),
         Line::from(vec![
             Span::styled(

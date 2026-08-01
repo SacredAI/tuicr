@@ -132,6 +132,7 @@ comments.
 ## Export your review
 
 When you're done reviewing, send your comments wherever the work continues.
+Comment and Request changes open an optional general comment box. Save it empty to skip it.
 
 ### To GitHub
 

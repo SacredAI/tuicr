@@ -772,6 +772,13 @@ pub struct SubmitPickerEntry {
     pub and_merge: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PendingSubmitComment {
+    pub event: crate::forge::submit::SubmitEvent,
+    pub skip_confirm: bool,
+    pub and_merge: bool,
+}
+
 /// Options shown in the bare-`:submit` action picker, in display order.
 /// `App::submit_picker_entries` filters this down to what the open PR
 /// actually allows.
@@ -1316,6 +1323,7 @@ pub struct App {
     /// In-flight `:submit*` state. `None` outside the resolver + confirmation
     /// modal flow; preflight populates it.
     pub submit_state: Option<SubmitState>,
+    pub(crate) pending_submit_comment: Option<PendingSubmitComment>,
     /// Cursor row inside the bare-`:submit` action picker modal. Only
     /// meaningful while `input_mode == SubmitActionPicker`.
     pub submit_picker_cursor: usize,

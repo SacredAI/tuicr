@@ -246,10 +246,11 @@ Submit failure leaves comments at `local_draft`. Success transitions to `submitt
 
 ### Submit pipeline (`src/forge/submit.rs`)
 
-1. **Preflight** maps each local comment to a GitHub-style inline anchor (path + line + side) by walking the displayed diff hunks.
-2. Unmappable comments go to the **resolver modal**: each one is either moved to the review summary or omitted.
-3. The **confirmation modal** shows counts and warns if the PR head advanced since load.
-4. The payload posts via `gh api --input -` (stdin, not CLI args, because CLI arg length limits would bite on multi-comment payloads).
+1. Comment and Request changes open the optional review-level comment editor.
+2. **Preflight** maps each local comment to a GitHub-style inline anchor (path + line + side) by walking the displayed diff hunks.
+3. Unmappable comments go to the **resolver modal**: each one is either moved to the review summary or omitted.
+4. The **confirmation modal** shows counts and warns if the PR head advanced since load.
+5. The payload posts via `gh api --input -` (stdin, not CLI args, because CLI arg length limits would bite on multi-comment payloads).
 
 ### Hard-won gotchas
 

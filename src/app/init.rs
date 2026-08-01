@@ -548,6 +548,7 @@ impl App {
             forge_config: crate::config::ForgeConfig::default(),
             username: crate::model::comment::DEFAULT_AUTHOR.to_string(),
             submit_state: None,
+            pending_submit_comment: None,
             submit_picker_cursor: 0,
             pr_submit_state: None,
             pr_submit_rx: None,

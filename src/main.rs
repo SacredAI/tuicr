@@ -880,7 +880,7 @@ fn handle_comment_vim_key(app: &mut App, key: crossterm::event::KeyEvent) -> boo
     if key.modifiers.contains(KeyModifiers::ALT) {
         match key.code {
             KeyCode::Enter => {
-                app.save_comment();
+                app.submit_comment_input();
                 return true;
             }
             KeyCode::Esc => {
@@ -914,8 +914,8 @@ fn handle_comment_vim_key(app: &mut App, key: crossterm::event::KeyEvent) -> boo
 
     match key.code {
         // Save shortcut in any mode (Ctrl-C cancel is handled earlier).
-        KeyCode::Char('s') if ctrl => app.save_comment(),
-        KeyCode::Enter if ctrl => app.save_comment(),
+        KeyCode::Char('s') if ctrl => app.submit_comment_input(),
+        KeyCode::Enter if ctrl => app.submit_comment_input(),
         // Tab cycles the comment type in Normal mode; in Insert it inserts a
         // soft tab (`comment_tab_width` spaces).
         KeyCode::Tab | KeyCode::Char('\t') if normal => app.cycle_comment_type(),

@@ -53,7 +53,7 @@ impl App {
     pub fn comment_vim_enter_normal(&mut self) {
         if self.comment_vim_pending == CommentVimPending::Save {
             self.comment_vim_pending = CommentVimPending::None;
-            self.save_comment();
+            self.submit_comment_input();
         } else {
             self.comment_vim_pending = CommentVimPending::Save;
         }
@@ -108,7 +108,7 @@ impl App {
     pub fn run_comment_vim_command(&mut self) {
         let cmd = self.comment_vim_command.take().unwrap_or_default();
         match cmd.trim() {
-            "w" | "wq" | "x" => self.save_comment(),
+            "w" | "wq" | "x" => self.submit_comment_input(),
             "q" | "q!" => self.exit_comment_mode(),
             "" => {}
             other => self.set_warning(format!("Not a comment command: :{other}")),

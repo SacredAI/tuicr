@@ -1,6 +1,62 @@
 use super::*;
 
 impl App {
+    pub fn start_submit_with_general_comment(
+        &mut self,
+        event: crate::forge::submit::SubmitEvent,
+        skip_confirm: bool,
+        and_merge: bool,
+    ) {
+        use crate::forge::submit::SubmitEvent;
+
+        if !matches!(event, SubmitEvent::Comment | SubmitEvent::RequestChanges) {
+            self.start_submit_with(event, skip_confirm, and_merge);
+            return;
+        }
+
+        let DiffSource::PullRequest(pr) = &self.diff_source else {
+            self.set_warning(":submit only applies in PR mode");
+            return;
+        };
+        if pr.is_read_only() {
+            let reason = pr.read_only_reason().unwrap_or("read only");
+            self.set_warning(format!("Cannot submit: PR is {reason}"));
+            return;
+        }
+
+        self.pending_submit_comment = Some(PendingSubmitComment {
+            event,
+            skip_confirm,
+            and_merge,
+        });
+        self.enter_review_comment_mode();
+        self.comment_type = CommentType::None;
+        self.message = None;
+    }
+
+    pub fn is_collecting_submit_comment(&self) -> bool {
+        self.pending_submit_comment.is_some()
+    }
+
+    pub fn submit_comment_input(&mut self) {
+        let Some(pending) = self.pending_submit_comment.take() else {
+            self.save_comment();
+            return;
+        };
+
+        if self.comment_buffer.trim().is_empty() {
+            self.exit_comment_mode();
+            self.start_submit_with(pending.event, pending.skip_confirm, pending.and_merge);
+            return;
+        }
+
+        let review_comment_count = self.session.review_comments.len();
+        self.save_comment();
+        if self.session.review_comments.len() > review_comment_count {
+            self.start_submit_with(pending.event, pending.skip_confirm, pending.and_merge);
+        }
+    }
+
     /// Drive `:submit*` preflight: walk every local-draft comment in the
     /// current PR session, map each one against the displayed diff, bucket
     /// the results, and transition into the resolver (when there are
@@ -147,10 +203,9 @@ impl App {
         }
     }
 
-    /// Open the bare-`:submit` action picker. The user picks
-    /// Comment/Approve/Request changes/Draft (or cancels); the picked event
-    /// then runs through preflight with `skip_confirm = true` so no extra
-    /// confirmation modal follows.
+    /// Open the bare-`:submit` action picker. Comment and Request changes
+    /// collect an optional general comment before preflight. The picked event
+    /// uses `skip_confirm = true` so no extra confirmation modal follows.
     pub fn start_submit_action_picker(&mut self) {
         if !matches!(self.diff_source, DiffSource::PullRequest(_)) {
             self.set_warning(":submit only applies in PR mode");
@@ -190,8 +245,7 @@ impl App {
         }
     }
 
-    /// Confirm the action picker selection: dispatch into preflight with the
-    /// chosen event and `skip_confirm = true`.
+    /// Confirm the action picker selection and continue its submit flow.
     pub fn submit_picker_confirm(&mut self) {
         let Some(entry) = self
             .submit_picker_entries()
@@ -202,7 +256,7 @@ impl App {
             return;
         };
         self.input_mode = InputMode::Normal;
-        self.start_submit_with(entry.event, true, entry.and_merge);
+        self.start_submit_with_general_comment(entry.event, true, entry.and_merge);
     }
 
     /// Cancel the action picker without entering preflight.

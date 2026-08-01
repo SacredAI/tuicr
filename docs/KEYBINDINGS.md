@@ -271,7 +271,8 @@ while `Esc` returns without jumping. Reviewed files and hunks are revealed for t
 losing their reviewed state.
 
 `draft` applies to GitHub only. `comment` and `approve` work on GitHub, GitLab, and Bitbucket.
-`request-changes` works on GitHub and GitLab, but not Bitbucket yet.
+`request-changes` works on GitHub and GitLab, but not Bitbucket yet. Comment and Request changes
+open an optional general comment box. Save it empty to submit without one.
 
 ## Commit selection / review target selector
 

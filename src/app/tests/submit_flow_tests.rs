@@ -528,11 +528,7 @@ fn should_advance_from_resolver_to_confirm() {
 }
 
 #[test]
-fn should_skip_confirm_modal_when_action_picker_dispatches_with_no_unmappable() {
-    // Bare `:submit` → action picker → pick Comment → directly dispatch
-    // the network call without SubmitConfirm. submit_state is cleared
-    // and pr_submit_state populated, same end state as the explicit
-    // `:submit comment` + [y] flow.
+fn should_collect_general_comment_before_picker_dispatch() {
     let mut app = make_pr_app_with_single_modified_file("src/lib.rs");
     add_line_comment(
         &mut app,
@@ -545,9 +541,28 @@ fn should_skip_confirm_modal_when_action_picker_dispatches_with_no_unmappable() 
     assert_eq!(app.input_mode, InputMode::SubmitActionPicker);
     app.submit_picker_confirm();
 
+    assert_eq!(app.input_mode, InputMode::Comment);
+    assert!(app.is_collecting_submit_comment());
+    app.comment_buffer = "Overall review comment".to_string();
+    app.comment_cursor = app.comment_buffer.len();
+    app.submit_comment_input();
+
     assert_eq!(app.input_mode, InputMode::Normal);
     assert!(app.submit_state.is_none());
     assert!(app.pr_submit_state.is_some());
+    assert_eq!(app.session.review_comments.len(), 1);
+    assert_eq!(
+        app.session.review_comments[0].content,
+        "Overall review comment"
+    );
+    assert!(app.session.review_comments[0].comment_type.is_none());
+    assert_eq!(
+        app.pr_submit_state
+            .as_ref()
+            .expect("submit in flight")
+            .review_comment_ids,
+        vec![app.session.review_comments[0].id.clone()]
+    );
 }
 
 #[test]
@@ -569,9 +584,10 @@ fn should_route_picker_through_resolver_then_skip_confirm() {
     app.start_submit_action_picker();
     app.submit_picker_cursor = 0; // Comment
     app.submit_picker_confirm();
+    assert_eq!(app.input_mode, InputMode::Comment);
+    app.submit_comment_input();
 
-    // Picker dispatched → resolver visible because the comment is
-    // unmappable, but the underlying skip_confirm flag is set.
+    // Skipping the optional body must retain the resolver path.
     assert_eq!(app.input_mode, InputMode::SubmitResolver);
     let state = app.submit_state.as_ref().expect("submit state");
     assert!(state.skip_confirm);
@@ -582,6 +598,28 @@ fn should_route_picker_through_resolver_then_skip_confirm() {
     assert_eq!(app.input_mode, InputMode::Normal);
     assert!(app.submit_state.is_none());
     assert!(app.pr_submit_state.is_some());
+}
+
+#[test]
+fn should_collect_general_comment_before_requesting_changes() {
+    let mut app = make_pr_app_with_single_modified_file("src/lib.rs");
+
+    app.start_submit_with_general_comment(SubmitEvent::RequestChanges, false, false);
+    assert_eq!(app.input_mode, InputMode::Comment);
+
+    app.comment_buffer = "Please fix the error handling".to_string();
+    app.comment_cursor = app.comment_buffer.len();
+    app.submit_comment_input();
+
+    assert_eq!(app.input_mode, InputMode::SubmitConfirm);
+    assert_eq!(
+        app.submit_state.as_ref().expect("submit state").event,
+        SubmitEvent::RequestChanges
+    );
+    assert_eq!(
+        app.session.review_comments[0].content,
+        "Please fix the error handling"
+    );
 }
 
 #[test]

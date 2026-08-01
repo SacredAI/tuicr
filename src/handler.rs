@@ -985,7 +985,7 @@ fn dispatch_command(app: &mut App, kind: CommandKind) -> CommandAfterDispatch {
         }
         CommandKind::Submit(event) => {
             app.exit_command_mode();
-            app.start_submit(event);
+            app.start_submit_with_general_comment(event, false, false);
             CommandAfterDispatch::KeepMode
         }
         CommandKind::Comments(visibility) => {
@@ -1183,7 +1183,7 @@ pub fn handle_comment_action(app: &mut App, action: Action) {
             app.comment_cursor = delete_char_before(&mut app.comment_buffer, app.comment_cursor);
         }
         Action::ExitMode => app.exit_comment_mode(),
-        Action::SubmitInput => app.save_comment(),
+        Action::SubmitInput => app.submit_comment_input(),
         Action::CycleCommentType => app.cycle_comment_type(),
         Action::CycleCommentTypeReverse => app.cycle_comment_type_reverse(),
         Action::TextCursorLeft => {

@@ -947,6 +947,7 @@ impl App {
 
     pub fn exit_comment_mode(&mut self) {
         self.input_mode = InputMode::Normal;
+        self.pending_submit_comment = None;
         self.comment_buffer.clear();
         self.comment_cursor = 0;
         self.comment_vim_editor = None;
