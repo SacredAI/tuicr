@@ -1041,15 +1041,6 @@ pub(super) fn render_side_by_side_diff(frame: &mut Frame, app: &mut App, area: R
 
     let diff = Paragraph::new(visible_lines).style(styles::panel_style(&app.theme));
     frame.render_widget(diff, inner);
-    crate::ui::diff_view::paint_binary_images(
-        frame,
-        app,
-        inner,
-        &binary_panes,
-        &row_heights,
-        app.diff_state.wrap_lines,
-    );
-
     paint_cursor_line_highlight(
         frame,
         inner,
@@ -1100,6 +1091,14 @@ pub(super) fn render_side_by_side_diff(frame: &mut Frame, app: &mut App, area: R
             app.comment_cursor_screen_pos = Some((screen_col, screen_row_abs));
         }
     }
+    crate::ui::diff_view::paint_binary_images(
+        frame,
+        app,
+        inner,
+        &binary_panes,
+        &row_heights,
+        app.diff_state.wrap_lines,
+    );
 }
 
 /// Render a single expanded context line in side-by-side mode
@@ -2138,6 +2137,7 @@ mod remote_comments_side_by_side_snapshot_tests {
                 old_lineno: Some(1),
                 new_lineno: Some(1),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             },
             DiffLine {
                 origin: LineOrigin::Addition,
@@ -2145,6 +2145,7 @@ mod remote_comments_side_by_side_snapshot_tests {
                 old_lineno: None,
                 new_lineno: Some(2),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             },
         ];
         let hunk = DiffHunk {
@@ -2276,6 +2277,7 @@ mod remote_comments_side_by_side_snapshot_tests {
                 old_lineno: None,
                 new_lineno: Some(n),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             })
             .collect();
         let hunks = vec![DiffHunk {
@@ -2285,6 +2287,7 @@ mod remote_comments_side_by_side_snapshot_tests {
             old_count: 0,
             new_start: 1,
             new_count: 120,
+            needs_highlight: true,
         }];
         let content_hash = DiffFile::compute_content_hash(&hunks);
         let path = PathBuf::from("src/lib.rs");
@@ -2370,6 +2373,7 @@ mod remote_comments_side_by_side_snapshot_tests {
                 old_lineno: Some(1),
                 new_lineno: None,
                 highlighted_spans: None,
+                intraline: Vec::new(),
             },
             DiffLine {
                 origin: LineOrigin::Addition,
@@ -2377,6 +2381,7 @@ mod remote_comments_side_by_side_snapshot_tests {
                 old_lineno: None,
                 new_lineno: Some(1),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             },
         ];
         let hunks = vec![DiffHunk {
@@ -2408,6 +2413,7 @@ mod remote_comments_side_by_side_snapshot_tests {
             old_lineno: Some(1),
             new_lineno: None,
             highlighted_spans: None,
+            intraline: Vec::new(),
         }];
         let hunks = vec![DiffHunk {
             header: "@@ -1,1 +0,0 @@".to_string(),
@@ -2576,6 +2582,7 @@ mod remote_comments_side_by_side_snapshot_tests {
                 old_lineno: None,
                 new_lineno: Some(i as u32 + 1),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             })
             .collect();
         let new_count = lines.len() as u32;

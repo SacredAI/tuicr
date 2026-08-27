@@ -860,7 +860,9 @@ impl App {
             if let Some(review) = self.session.files.get(path) {
                 cumulative += review.file_comments.len();
             }
-            if file.is_binary || file.hunks.is_empty() {
+            if file.is_binary {
+                cumulative += self.binary_block(file.display_path()).lines.len();
+            } else if file.hunks.is_empty() {
                 cumulative += 1;
             } else {
                 for (hunk_idx, hunk) in file.hunks.iter().enumerate() {
@@ -1073,7 +1075,9 @@ impl App {
             }
         }
 
-        if file.is_binary || file.hunks.is_empty() {
+        if file.is_binary {
+            content_lines = self.binary_block(file.display_path()).lines.len();
+        } else if file.hunks.is_empty() {
             content_lines = 1;
         } else {
             let line_comments = self.session.files.get(path).map(|r| &r.line_comments);

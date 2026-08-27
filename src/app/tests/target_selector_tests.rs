@@ -434,13 +434,6 @@ impl crate::forge::traits::ForgeBackend for FakeForgeBackend {
     ) -> Result<crate::forge::traits::GhCreateReviewResponse> {
         unimplemented!("FakeForgeBackend does not implement create_review")
     }
-    fn merge_pull_request(
-        &self,
-        _pr: &crate::forge::traits::PullRequestDetails,
-        _method: crate::config::MergeMethod,
-    ) -> Result<crate::forge::submit::MergeOutcome> {
-        unimplemented!("FakeForgeBackend does not implement merge_pull_request")
-    }
 }
 
 fn sample_pr(number: u64, title: &str) -> PullRequestSummary {
@@ -2036,13 +2029,6 @@ impl crate::forge::traits::ForgeBackend for FailingForgeBackend {
     ) -> Result<crate::forge::traits::GhCreateReviewResponse> {
         unimplemented!()
     }
-    fn merge_pull_request(
-        &self,
-        _pr: &crate::forge::traits::PullRequestDetails,
-        _method: crate::config::MergeMethod,
-    ) -> Result<crate::forge::submit::MergeOutcome> {
-        unimplemented!()
-    }
 }
 
 #[test]
@@ -2543,7 +2529,7 @@ struct ThreadAwareForgeBackend {
     details: crate::forge::traits::PullRequestDetails,
     patch: String,
     threads: Vec<RemoteReviewThread>,
-    calls: std::sync::atomic::AtomicU32,
+    calls: std::cell::Cell<u32>,
 }
 
 impl ThreadAwareForgeBackend {
@@ -2556,7 +2542,7 @@ impl ThreadAwareForgeBackend {
             details,
             patch,
             threads,
-            calls: std::sync::atomic::AtomicU32::new(0),
+            calls: std::cell::Cell::new(0),
         }
     }
 }
@@ -2590,8 +2576,7 @@ impl crate::forge::traits::ForgeBackend for ThreadAwareForgeBackend {
         &self,
         _pr: &crate::forge::traits::PullRequestDetails,
     ) -> Result<Vec<RemoteReviewThread>> {
-        self.calls
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.calls.set(self.calls.get() + 1);
         Ok(self.threads.clone())
     }
     fn list_pull_request_commits(
@@ -2613,13 +2598,6 @@ impl crate::forge::traits::ForgeBackend for ThreadAwareForgeBackend {
         _pr: &crate::forge::traits::PullRequestDetails,
         _request: crate::forge::traits::CreateReviewRequest<'_>,
     ) -> Result<crate::forge::traits::GhCreateReviewResponse> {
-        unimplemented!()
-    }
-    fn merge_pull_request(
-        &self,
-        _pr: &crate::forge::traits::PullRequestDetails,
-        _method: crate::config::MergeMethod,
-    ) -> Result<crate::forge::submit::MergeOutcome> {
         unimplemented!()
     }
 }

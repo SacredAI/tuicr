@@ -269,25 +269,26 @@ impl App {
             }
         };
 
-        let fetch = |start: u32, end: u32| -> Result<Vec<DiffLine>> {
-            let mut lines = self.context_provider().fetch_context_lines(
-                old_path.as_ref(),
-                new_path.as_ref(),
-                file_status,
-                start,
-                end,
-            )?;
-            for line in &mut lines {
-                if let Some(n) = line.new_lineno {
-                    line.old_lineno = Some((n as i64 - delta) as u32);
+        let fetch =
+            |start: u32, end: u32| -> Result<Vec<DiffLine>> {
+                let mut lines = self.context_provider().fetch_context_lines(
+                    old_path.as_ref(),
+                    new_path.as_ref(),
+                    file_status,
+                    start,
+                    end,
+                )?;
+                for line in &mut lines {
+                    if let Some(n) = line.new_lineno {
+                        line.old_lineno = Some((n as i64 - delta) as u32);
+                    }
                 }
-            }
-            Ok(self.highlight_expanded_lines(
-                new_path.as_ref().or(old_path.as_ref()),
-                lines,
-                start,
-            ))
-        };
+                Ok(self.highlight_expanded_lines(
+                    new_path.as_ref().or(old_path.as_ref()),
+                    lines,
+                    start,
+                ))
+            };
 
         match direction {
             ExpandDirection::Down => {
@@ -353,7 +354,9 @@ impl App {
             new_count: count,
             needs_highlight: false,
         };
-        self.theme.syntax_highlighter().highlight_hunk(path, &mut hunk);
+        self.theme
+            .syntax_highlighter()
+            .highlight_hunk(path, &mut hunk);
         hunk.lines
     }
 

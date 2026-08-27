@@ -283,13 +283,6 @@ impl crate::forge::traits::ForgeBackend for FakeForgeBackend {
     ) -> crate::error::Result<crate::forge::traits::GhCreateReviewResponse> {
         unimplemented!()
     }
-    fn merge_pull_request(
-        &self,
-        _pr: &crate::forge::traits::PullRequestDetails,
-        _method: crate::config::MergeMethod,
-    ) -> crate::error::Result<crate::forge::submit::MergeOutcome> {
-        unimplemented!()
-    }
     fn local_checkout_path(&self) -> Option<PathBuf> {
         self.local_checkout.clone()
     }

@@ -45,6 +45,7 @@ fn hunk() -> DiffHunk {
                 old_lineno: Some(1),
                 new_lineno: Some(1),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             },
             DiffLine {
                 origin: LineOrigin::Addition,
@@ -52,12 +53,14 @@ fn hunk() -> DiffHunk {
                 old_lineno: None,
                 new_lineno: Some(2),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             },
         ],
         old_start: 1,
         old_count: 1,
         new_start: 1,
         new_count: 2,
+        needs_highlight: true,
     }
 }
 

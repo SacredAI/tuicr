@@ -41,6 +41,7 @@ fn line(origin: LineOrigin, content: &str, old: Option<u32>, new: Option<u32>) -
         old_lineno: old,
         new_lineno: new,
         highlighted_spans: None,
+        intraline: Vec::new(),
     }
 }
 
@@ -57,6 +58,7 @@ fn file(path: &str, contents: &[&str]) -> DiffFile {
         old_count: 0,
         new_start: 1,
         new_count: contents.len() as u32,
+        needs_highlight: true,
     }];
     let content_hash = DiffFile::compute_content_hash(&hunks);
     DiffFile {

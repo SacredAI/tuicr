@@ -66,6 +66,7 @@ fn line(idx: usize) -> DiffLine {
         old_lineno: Some(idx as u32 + 1),
         new_lineno: Some(idx as u32 + 1),
         highlighted_spans: Some(spans),
+        intraline: Vec::new(),
     }
 }
 
@@ -78,6 +79,7 @@ fn file(path: &str, lines_per_file: usize) -> DiffFile {
         old_count: lines_per_file as u32,
         new_start: 1,
         new_count: lines_per_file as u32,
+        needs_highlight: true,
     }];
     let content_hash = DiffFile::compute_content_hash(&hunks);
     DiffFile {

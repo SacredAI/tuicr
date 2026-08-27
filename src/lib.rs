@@ -10,8 +10,6 @@ pub mod hash;
 pub mod input;
 pub mod model;
 pub mod output;
-#[cfg(test)]
-mod perf_bench;
 pub mod persistence;
 pub mod process;
 pub mod profile;

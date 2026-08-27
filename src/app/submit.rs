@@ -568,15 +568,18 @@ impl App {
     /// draft event), stamp `remote_review_id`, save the session again, and
     /// publish a success message. On failure: keep everything as
     /// `LocalDraft` and set a sticky error.
-    pub fn finish_pr_submit(
+    pub fn finish_pr_submit<T: Into<PrSubmitResult>>(
         &mut self,
         in_flight: SubmitInFlightState,
-        result: std::result::Result<PrSubmitResult, String>,
+        result: std::result::Result<T, String>,
     ) {
         use crate::forge::submit::SubmitEvent;
 
         let (response, merge) = match result {
-            Ok(r) => (r.review, r.merge),
+            Ok(r) => {
+                let r: PrSubmitResult = r.into();
+                (r.review, r.merge)
+            }
             Err(e) => {
                 self.set_error(format!("Submit failed: {e}"));
                 return;

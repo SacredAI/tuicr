@@ -293,11 +293,13 @@ fn one_line_hunk() -> DiffHunk {
             old_lineno: None,
             new_lineno: Some(1),
             highlighted_spans: None,
+            intraline: Vec::new(),
         }],
         old_start: 1,
         old_count: 1,
         new_start: 1,
         new_count: 1,
+        needs_highlight: true,
     }
 }
 

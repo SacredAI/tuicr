@@ -97,7 +97,7 @@ impl GitCliBackend {
         new_source: GitContentSource<'_>,
         highlighter: &SyntaxHighlighter,
     ) -> Result<Vec<DiffFile>> {
-        let args = pin_diff_flags(args, self.whitespace_mode.ignores_all());
+        let mut args = pin_diff_flags(args, self.whitespace_mode.ignores_all());
         // Paths and status come from Git's NUL-delimited raw records. Patch
         // headers remain display-only and may follow any user quoting/prefix
         // configuration without affecting file identity.
@@ -855,6 +855,7 @@ fn build_untracked_diff_file(
                 Some(idx),
                 LineOrigin::Addition,
             ),
+            intraline: Vec::new(),
         })
         .collect();
 

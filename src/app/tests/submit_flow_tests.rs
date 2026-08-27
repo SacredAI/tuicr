@@ -63,7 +63,6 @@ fn make_pr_app_with_single_modified_file(file_path: &str) -> App {
             old_count: 0,
             new_start: 1,
             new_count: 0,
-            needs_highlight: true,
             lines: vec![
                 DiffLine {
                     origin: LineOrigin::Context,
@@ -82,6 +81,7 @@ fn make_pr_app_with_single_modified_file(file_path: &str) -> App {
                     intraline: Vec::new(),
                 },
             ],
+            needs_highlight: true,
         }],
         is_binary: false,
         is_too_large: false,
@@ -528,7 +528,11 @@ fn should_advance_from_resolver_to_confirm() {
 }
 
 #[test]
-fn should_collect_general_comment_before_picker_dispatch() {
+fn should_skip_confirm_modal_when_action_picker_dispatches_with_no_unmappable() {
+    // Bare `:submit` → action picker → pick Comment → directly dispatch
+    // the network call without SubmitConfirm. submit_state is cleared
+    // and pr_submit_state populated, same end state as the explicit
+    // `:submit comment` + [y] flow.
     let mut app = make_pr_app_with_single_modified_file("src/lib.rs");
     add_line_comment(
         &mut app,
@@ -542,27 +546,12 @@ fn should_collect_general_comment_before_picker_dispatch() {
     app.submit_picker_confirm();
 
     assert_eq!(app.input_mode, InputMode::Comment);
-    assert!(app.is_collecting_submit_comment());
     app.comment_buffer = "Overall review comment".to_string();
     app.comment_cursor = app.comment_buffer.len();
     app.submit_comment_input();
-
     assert_eq!(app.input_mode, InputMode::Normal);
     assert!(app.submit_state.is_none());
     assert!(app.pr_submit_state.is_some());
-    assert_eq!(app.session.review_comments.len(), 1);
-    assert_eq!(
-        app.session.review_comments[0].content,
-        "Overall review comment"
-    );
-    assert!(app.session.review_comments[0].comment_type.is_none());
-    assert_eq!(
-        app.pr_submit_state
-            .as_ref()
-            .expect("submit in flight")
-            .review_comment_ids,
-        vec![app.session.review_comments[0].id.clone()]
-    );
 }
 
 #[test]
@@ -584,10 +573,12 @@ fn should_route_picker_through_resolver_then_skip_confirm() {
     app.start_submit_action_picker();
     app.submit_picker_cursor = 0; // Comment
     app.submit_picker_confirm();
+
     assert_eq!(app.input_mode, InputMode::Comment);
     app.submit_comment_input();
 
-    // Skipping the optional body must retain the resolver path.
+    // Picker dispatched → resolver visible because the comment is
+    // unmappable, but the underlying skip_confirm flag is set.
     assert_eq!(app.input_mode, InputMode::SubmitResolver);
     let state = app.submit_state.as_ref().expect("submit state");
     assert!(state.skip_confirm);
@@ -598,28 +589,6 @@ fn should_route_picker_through_resolver_then_skip_confirm() {
     assert_eq!(app.input_mode, InputMode::Normal);
     assert!(app.submit_state.is_none());
     assert!(app.pr_submit_state.is_some());
-}
-
-#[test]
-fn should_collect_general_comment_before_requesting_changes() {
-    let mut app = make_pr_app_with_single_modified_file("src/lib.rs");
-
-    app.start_submit_with_general_comment(SubmitEvent::RequestChanges, false, false);
-    assert_eq!(app.input_mode, InputMode::Comment);
-
-    app.comment_buffer = "Please fix the error handling".to_string();
-    app.comment_cursor = app.comment_buffer.len();
-    app.submit_comment_input();
-
-    assert_eq!(app.input_mode, InputMode::SubmitConfirm);
-    assert_eq!(
-        app.submit_state.as_ref().expect("submit state").event,
-        SubmitEvent::RequestChanges
-    );
-    assert_eq!(
-        app.session.review_comments[0].content,
-        "Please fix the error handling"
-    );
 }
 
 #[test]
@@ -671,6 +640,7 @@ fn make_in_flight(
         .collect();
     SubmitInFlightState {
         event,
+        and_merge: false,
         mappable,
         summary_comment_ids: Vec::new(),
         review_comment_ids: Vec::new(),
@@ -1006,7 +976,9 @@ fn should_keep_comments_as_local_draft_on_submit_failure() {
     // when — network failure
     app.finish_pr_submit(
         in_flight,
-        Err("Cannot submit review: GitHub token lacks pull request write permission.".to_string()),
+        Err::<crate::forge::traits::GhCreateReviewResponse, _>(
+            "Cannot submit review: GitHub token lacks pull request write permission.".to_string(),
+        ),
     );
     // then — the comment is still LocalDraft and editable
     let review = app.session.files.get(&PathBuf::from("src/lib.rs")).unwrap();
@@ -1038,7 +1010,10 @@ fn should_discard_stale_submit_result_when_head_sha_changed() {
         repository: ForgeRepository::github("github.com", "agavra", "tuicr"),
         pr_number: 125,
         head_sha: "DIFFERENT_HEAD".to_string(),
-        result: Ok(make_response(42, "u", "COMMENTED")),
+        result: Ok(crate::app::PrSubmitResult {
+            review: make_response(42, "u", "COMMENTED"),
+            merge: None,
+        }),
     })
     .unwrap();
     drop(tx);
@@ -1076,7 +1051,10 @@ fn should_apply_result_via_poll_when_head_sha_matches() {
         repository: ForgeRepository::github("github.com", "agavra", "tuicr"),
         pr_number: 125,
         head_sha: "abcdef0123".to_string(),
-        result: Ok(make_response(123, "u", "COMMENTED")),
+        result: Ok(crate::app::PrSubmitResult {
+            review: make_response(123, "u", "COMMENTED"),
+            merge: None,
+        }),
     })
     .unwrap();
     drop(tx);

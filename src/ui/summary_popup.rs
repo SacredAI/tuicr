@@ -435,6 +435,7 @@ mod tests {
                 old_lineno: Some(start + offset),
                 new_lineno: Some(start + offset),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             })
             .collect();
         DiffHunk {
@@ -444,6 +445,7 @@ mod tests {
             old_count: count,
             new_start: start,
             new_count: count,
+            needs_highlight: true,
         }
     }
 

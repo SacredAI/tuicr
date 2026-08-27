@@ -1022,6 +1022,15 @@ pub struct PrSubmitResult {
     pub merge: Option<std::result::Result<crate::forge::submit::MergeOutcome, String>>,
 }
 
+impl From<crate::forge::traits::GhCreateReviewResponse> for PrSubmitResult {
+    fn from(review: crate::forge::traits::GhCreateReviewResponse) -> Self {
+        Self {
+            review,
+            merge: None,
+        }
+    }
+}
+
 /// Result delivered from the create-review background thread.
 #[derive(Debug)]
 pub enum PrSubmitEvent {
@@ -1226,6 +1235,8 @@ pub struct App {
     /// `Enter`/`Esc` arms Save/Cancel (with a header hint), the second performs
     /// it (`:w`/`:q`). Any other key resets it.
     pub comment_vim_pending: CommentVimPending,
+    /// Set while a Helix `g` prefix waits for its motion key in the comment box.
+    pub comment_helix_goto_pending: bool,
     pub comment_type: CommentType,
     pub comment_types: Vec<CommentTypeDefinition>,
     pub comment_is_review_level: bool,

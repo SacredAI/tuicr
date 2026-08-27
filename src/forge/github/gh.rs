@@ -66,7 +66,7 @@ pub enum GhCommandError {
 
 pub type GhCommandResult<T> = std::result::Result<T, GhCommandError>;
 
-pub trait GhCommandRunner: Sync {
+pub trait GhCommandRunner {
     fn run(&self, args: &[String]) -> GhCommandResult<String>;
 
     /// Variant for `gh` invocations that take their payload on stdin (e.g.
@@ -283,6 +283,33 @@ where
         Err(TuicrError::Forge(
             "GitHub pull request exceeds the 3000-file REST API limit".into(),
         ))
+    }
+}
+
+impl<R> GitHubGhBackend<R>
+where
+    R: GhCommandRunner,
+{
+    fn get_compare_diff(
+        &self,
+        pr: &PullRequestDetails,
+        start_sha: &str,
+        end_sha: &str,
+    ) -> Result<String> {
+        let endpoint = format!(
+            "repos/{}/{}/compare/{}...{}",
+            pr.repository.owner, pr.repository.name, start_sha, end_sha,
+        );
+        let mut args = vec![
+            "api".to_string(),
+            "-H".to_string(),
+            "Accept: application/vnd.github.diff".to_string(),
+        ];
+        if pr.repository.host != DEFAULT_GITHUB_HOST {
+            args.extend(["--hostname".to_string(), pr.repository.host.clone()]);
+        }
+        args.push(endpoint);
+        self.run_gh(args, &pr.repository.host)
     }
 }
 
@@ -1244,6 +1271,7 @@ index 1111111..2222222 100644
     #[derive(Default)]
     struct FakeGhRunner {
         calls: Mutex<Vec<Vec<String>>>,
+        diff_error: Mutex<Option<GhCommandError>>,
         /// Captured stdin payloads, paired in order with `calls` entries that
         /// went through `run_with_stdin`. Empty for plain `run` invocations.
         stdin_calls: Mutex<Vec<(Vec<String>, String)>>,
@@ -1263,7 +1291,12 @@ index 1111111..2222222 100644
                 Some("pr") => match args.get(1).map(String::as_str) {
                     Some("list") => Ok(PR_LIST_JSON.to_string()),
                     Some("view") => Ok(PR_VIEW_JSON.to_string()),
-                    Some("diff") => Ok(PR_PATCH.to_string()),
+                    Some("diff") => self
+                        .diff_error
+                        .lock()
+                        .unwrap()
+                        .clone()
+                        .map_or_else(|| Ok(PR_PATCH.to_string()), Err),
                     _ => Err(GhCommandError::Failed {
                         status: Some(1),
                         stderr: "unexpected pr command".to_string(),
@@ -1890,7 +1923,7 @@ Match host github-work
             .unwrap();
 
         assert!(info.checks.is_empty());
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(
             calls[0].last().map(String::as_str),
@@ -1916,7 +1949,7 @@ Match host github-work
             .unwrap();
 
         assert!(info.issue_comments.is_empty());
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(
             calls[0].last().map(String::as_str),
@@ -1984,6 +2017,32 @@ Match host github-work
             !diff_call.iter().any(|a| a == "--patch"),
             "`gh pr diff` must NOT pass --patch (mbox output duplicates files); got {diff_call:?}"
         );
+    }
+
+    #[test]
+    fn falls_back_to_compare_for_large_pull_request_diffs() {
+        let runner = FakeGhRunner::default();
+        *runner.diff_error.lock().unwrap() = Some(GhCommandError::Failed {
+            status: Some(1),
+            stderr: "GraphQL: PullRequest.diff TOO_LARGE (HTTP 406)".to_string(),
+        });
+        let backend = GitHubGhBackend::with_runner(Some(repo()), runner);
+        let details = backend
+            .get_pull_request(parse_pull_request_target("125").unwrap())
+            .unwrap();
+
+        let patches = backend.get_pull_request_diff(&details).unwrap();
+
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].patch, COMPARE_DIFF);
+        let calls = backend.runner.calls.lock().unwrap();
+        assert!(calls.iter().any(|args| {
+            args.first().map(String::as_str) == Some("api")
+                && args.iter().any(|arg| arg.contains("/compare/"))
+                && args
+                    .iter()
+                    .any(|arg| arg == "Accept: application/vnd.github.diff")
+        }));
     }
 
     #[test]

@@ -216,6 +216,7 @@ where
                 old_lineno,
                 new_lineno,
                 highlighted_spans,
+                intraline: Vec::new(),
             }
         })
         .collect();
@@ -227,6 +228,7 @@ where
         old_count,
         new_start,
         new_count,
+        needs_highlight: true,
     })
 }
 

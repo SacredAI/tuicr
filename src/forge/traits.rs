@@ -482,7 +482,7 @@ impl PullRequestInfo {
 /// `Sync` because the PR open path fans its independent fetches out across
 /// scoped threads sharing one backend. Every method takes `&self`; real
 /// backends are stateless CLI wrappers.
-pub trait ForgeBackend: Sync {
+pub trait ForgeBackend {
     fn list_pull_requests(&self, query: PullRequestListQuery) -> Result<PagedPullRequests>;
     fn get_pull_request(&self, target: PullRequestTarget) -> Result<PullRequestDetails>;
     /// Fetch PR metadata for the description panel. The default builds a
@@ -573,9 +573,13 @@ pub trait ForgeBackend: Sync {
     /// carrying text a user can act on.
     fn merge_pull_request(
         &self,
-        pr: &PullRequestDetails,
-        method: MergeMethod,
-    ) -> Result<MergeOutcome>;
+        _pr: &PullRequestDetails,
+        _method: MergeMethod,
+    ) -> Result<MergeOutcome> {
+        Err(crate::error::TuicrError::UnsupportedOperation(
+            "This forge cannot merge pull requests".to_string(),
+        ))
+    }
 }
 
 #[cfg(test)]

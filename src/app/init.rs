@@ -510,6 +510,7 @@ impl App {
             comment_vim_editor: None,
             comment_vim_command: None,
             comment_vim_pending: CommentVimPending::None,
+            comment_helix_goto_pending: false,
             comment_type: default_comment_type,
             comment_types,
             comment_is_review_level: false,
@@ -905,6 +906,7 @@ impl App {
             backend.as_ref(),
             parsed,
             local_checkout_for_target.as_deref(),
+            theme.syntax_highlighter(),
         )?;
         let opened = Self::opened_pr_with_persisted_session(opened)?;
 

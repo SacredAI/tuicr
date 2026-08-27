@@ -125,6 +125,7 @@ fn make_hunk(new_start: u32, new_count: u32) -> DiffHunk {
             old_lineno: Some(new_start + i),
             new_lineno: Some(new_start + i),
             highlighted_spans: None,
+            intraline: Vec::new(),
         });
     }
     DiffHunk {
@@ -134,6 +135,7 @@ fn make_hunk(new_start: u32, new_count: u32) -> DiffHunk {
         old_count: new_count,
         new_start,
         new_count,
+        needs_highlight: true,
     }
 }
 

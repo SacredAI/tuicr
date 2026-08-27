@@ -454,6 +454,7 @@ mod tests {
                     old_lineno: Some(n),
                     new_lineno: Some(n),
                     highlighted_spans: None,
+                    intraline: Vec::new(),
                 })
                 .collect())
         }
@@ -490,6 +491,7 @@ mod tests {
                     old_lineno: Some(30),
                     new_lineno: Some(30),
                     highlighted_spans: None,
+                    intraline: Vec::new(),
                 },
                 DiffLine {
                     origin: LineOrigin::Deletion,
@@ -497,6 +499,7 @@ mod tests {
                     old_lineno: Some(31),
                     new_lineno: None,
                     highlighted_spans: None,
+                    intraline: Vec::new(),
                 },
                 DiffLine {
                     origin: LineOrigin::Addition,
@@ -504,6 +507,7 @@ mod tests {
                     old_lineno: None,
                     new_lineno: Some(31),
                     highlighted_spans: None,
+                    intraline: Vec::new(),
                 },
                 DiffLine {
                     origin: LineOrigin::Addition,
@@ -511,12 +515,14 @@ mod tests {
                     old_lineno: None,
                     new_lineno: Some(32),
                     highlighted_spans: None,
+                    intraline: Vec::new(),
                 },
             ],
             old_start: 30,
             old_count: 2,
             new_start: 30,
             new_count: 3,
+            needs_highlight: true,
         };
         let hunk2 = DiffHunk {
             header: "@@ -100,1 +100,1 @@ fn bar".to_string(),
@@ -526,11 +532,13 @@ mod tests {
                 old_lineno: Some(100),
                 new_lineno: Some(100),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             }],
             old_start: 100,
             old_count: 1,
             new_start: 100,
             new_count: 1,
+            needs_highlight: true,
         };
         let hunks = vec![hunk1, hunk2];
         let content_hash = DiffFile::compute_content_hash(&hunks);

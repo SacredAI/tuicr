@@ -16,8 +16,7 @@ use crate::theme::Theme;
 use crate::ui::comment_panel;
 use crate::ui::diff_view::{
     apply_horizontal_scroll, comment_box_visible, comment_type_presentation, cursor_indicator,
-    cursor_indicator_spaced,
-    diff_line_content_spans, diff_stat_title, hunk_header_text_and_style,
+    cursor_indicator_spaced, diff_line_content_spans, diff_stat_title, hunk_header_text_and_style,
     paint_cursor_line_highlight, paint_unified_diff_rows_with, paint_visual_selection_overlay,
     populate_row_to_annotation, push_comment_bar, render_expander_line, render_hidden_lines,
     scroll_comment_input_into_view, skip_comment_box, unified_line_bg_style,
@@ -1312,15 +1311,6 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
     // Keep paragraph bg unset so pre-painted per-row diff backgrounds remain visible.
     let diff = Paragraph::new(visible_lines).style(Style::default().fg(app.theme.fg_primary));
     frame.render_widget(diff, inner);
-    crate::ui::diff_view::paint_binary_images(
-        frame,
-        app,
-        inner,
-        &binary_panes,
-        &row_heights,
-        app.diff_state.wrap_lines,
-    );
-
     // Cursor-line bg has to land after the paragraph: spans on +/- lines carry
     // explicit diff_add_bg/diff_del_bg that would mask a pre-paint over the code.
     paint_cursor_line_highlight(
@@ -1377,6 +1367,14 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
             app.comment_cursor_screen_pos = Some((screen_col, screen_row_abs));
         }
     }
+    crate::ui::diff_view::paint_binary_images(
+        frame,
+        app,
+        inner,
+        &binary_panes,
+        &row_heights,
+        app.diff_state.wrap_lines,
+    );
 }
 
 /// Render remote review threads anchored at `(path, line, side)` into the
@@ -2072,6 +2070,7 @@ mod remote_comments_snapshot_tests {
                 old_lineno: None,
                 new_lineno: Some(n),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             })
             .collect();
         let hunks = vec![DiffHunk {
@@ -2081,6 +2080,7 @@ mod remote_comments_snapshot_tests {
             old_count: 0,
             new_start: 1,
             new_count: 120,
+            needs_highlight: true,
         }];
         let content_hash = DiffFile::compute_content_hash(&hunks);
         let path = PathBuf::from("src/lib.rs");
@@ -2151,6 +2151,7 @@ mod remote_comments_snapshot_tests {
                 old_lineno: None,
                 new_lineno: Some(i + 1),
                 highlighted_spans: None,
+                intraline: Vec::new(),
             })
             .collect();
         lines.push(DiffLine {
@@ -2159,6 +2160,7 @@ mod remote_comments_snapshot_tests {
             old_lineno: None,
             new_lineno: Some(31),
             highlighted_spans: None,
+            intraline: Vec::new(),
         });
         let hunk = DiffHunk {
             header: "@@ -0,0 +1,31 @@".to_string(),
@@ -2167,6 +2169,7 @@ mod remote_comments_snapshot_tests {
             old_count: 0,
             new_start: 1,
             new_count: 31,
+            needs_highlight: true,
         };
         let hunks = vec![hunk];
         let content_hash = DiffFile::compute_content_hash(&hunks);

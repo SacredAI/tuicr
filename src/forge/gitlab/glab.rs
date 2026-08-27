@@ -24,7 +24,8 @@ use super::models::{
     GlabMrVersion, GlabUser,
 };
 use crate::config::MergeMethod;
-use crate::forge::submit::{DiffAnchor, GhSide, MergeFailureKind, MergeOutcome, SubmitEvent, classify_merge_failure,
+use crate::forge::submit::{
+    DiffAnchor, GhSide, MergeFailureKind, MergeOutcome, SubmitEvent, classify_merge_failure,
     merge_failure_message,
 };
 use crate::forge::traits::CreateReviewRequest;
@@ -39,7 +40,7 @@ pub enum GlabCommandError {
 
 pub type GlabCommandResult<T> = std::result::Result<T, GlabCommandError>;
 
-pub trait GlabCommandRunner: Sync {
+pub trait GlabCommandRunner {
     fn run(&self, args: &[String]) -> GlabCommandResult<String>;
 
     fn run_with_stdin(&self, _args: &[String], _stdin: &str) -> GlabCommandResult<String> {
@@ -1550,7 +1551,7 @@ mod tests {
             patches[0].new_path.as_deref(),
             Some(Path::new("日本語 b/and file.sql"))
         );
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         assert!(
             calls[0]
                 .0
@@ -1766,7 +1767,7 @@ mod tests {
             comments: &[inline],
         };
         backend.create_review(&pr, request).unwrap();
-        let calls = backend.runner.calls.borrow();
+        let calls = backend.runner.calls.lock().unwrap();
         let (_, stdin) = &calls[0];
         let body: serde_json::Value = serde_json::from_str(stdin.as_ref().unwrap()).unwrap();
         let position = &body["position"];

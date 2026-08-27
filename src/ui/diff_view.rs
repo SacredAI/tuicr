@@ -9,7 +9,7 @@ use ratatui_image::Image as RatatuiImage;
 
 use crate::app::binary::{BINARY_BLOCK_INDENT, BinaryImageKey};
 use crate::app::{
-    AnnotatedLine, App, DiffViewMode, ExpandDirection, GAP_EXPAND_BATCH, VisualSelection,
+    AnnotatedLine, App, DiffViewMode, ExpandDirection, GAP_EXPAND_BATCH, InputMode, VisualSelection,
 };
 use crate::model::{Comment, DiffFile, DiffHunk, DiffLine, LineOrigin, LineSide};
 use crate::theme::Theme;
@@ -157,13 +157,39 @@ pub(super) static EMPTY_LINE_COMMENTS: std::sync::LazyLock<
 /// placeholders so the bulk of per-line allocations are skipped.
 ///
 /// In Comment mode the scroll offset may still be adjusted after building (to
-/// keep the inline input box visible), so fall back to building everything.
+/// keep the inline input box visible). Build a cursor-centred safety window in
+/// that case: the active input box is rendered separately, while nearby
+/// comments and diff lines remain fully styled. The rest use placeholders.
 pub(super) fn diff_visible_range(app: &App, inner: Rect) -> (usize, usize) {
-    if app.input_mode == crate::app::InputMode::Comment {
-        (0, usize::MAX)
+    diff_visible_range_for(
+        app.input_mode,
+        app.diff_state.cursor_line,
+        app.diff_state.scroll_offset,
+        inner.height as usize,
+    )
+}
+
+/// Choose the logical rows that need full styling for a frame.
+///
+/// Comment input can move the viewport after the diff lines have been built,
+/// so its range is anchored to the cursor rather than the old scroll offset.
+/// A few viewport heights provide room for the input box and nearby comments;
+/// rows beyond that window are still represented by placeholders.
+fn diff_visible_range_for(
+    input_mode: InputMode,
+    cursor_line: usize,
+    scroll_offset: usize,
+    viewport_height: usize,
+) -> (usize, usize) {
+    let height = viewport_height.max(1);
+    if input_mode == InputMode::Comment {
+        let radius = height.saturating_mul(2);
+        (
+            cursor_line.saturating_sub(radius),
+            cursor_line.saturating_add(radius),
+        )
     } else {
-        let start = app.diff_state.scroll_offset;
-        (start, start.saturating_add(inner.height as usize))
+        (scroll_offset, scroll_offset.saturating_add(height))
     }
 }
 
@@ -1470,5 +1496,28 @@ mod tests {
         scroll_comment_input_into_view(&mut scroll, Some((8, 10)), Some(9), 10, 100);
         // then: scroll so box_end (10) is visible => scroll = 10 - 10 + 1 = 1
         assert_eq!(scroll, 1);
+    }
+
+    #[test]
+    fn comment_rendering_is_bounded_around_the_cursor() {
+        let (start, end) = diff_visible_range_for(InputMode::Comment, 10_000, 0, 40);
+
+        assert_eq!(start, 9_920);
+        assert_eq!(end, 10_080);
+    }
+
+    #[test]
+    fn comment_rendering_clamps_at_the_start_of_the_diff() {
+        let (start, end) = diff_visible_range_for(InputMode::Comment, 3, 0, 40);
+
+        assert_eq!(start, 0);
+        assert_eq!(end, 83);
+    }
+
+    #[test]
+    fn non_comment_rendering_tracks_the_scroll_offset() {
+        let (start, end) = diff_visible_range_for(InputMode::Normal, 10_000, 120, 40);
+
+        assert_eq!((start, end), (120, 160));
     }
 }
