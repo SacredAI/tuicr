@@ -4,7 +4,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crossterm::{
-    event::{self, Event, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
     terminal::supports_keyboard_enhancement,
 };
 
@@ -49,6 +49,23 @@ fn event_drain_timeout(drained: usize, stop_after_input: bool) -> Option<Duratio
         n if n < EVENT_DRAIN_LIMIT => Some(Duration::ZERO),
         _ => None,
     }
+}
+
+/// Navigation keys are safe to coalesce with the repeat events already queued
+/// by the terminal. Stopping after every `j`/`k`/arrow leaves old repeats in
+/// the queue when a frame takes longer than the repeat interval, so release
+/// appears to do nothing until that backlog is rendered away.
+fn is_cursor_navigation_key(key: &KeyEvent) -> bool {
+    key.modifiers.is_empty()
+        && matches!(
+            key.code,
+            KeyCode::Char('j') | KeyCode::Char('k') | KeyCode::Up | KeyCode::Down
+        )
+}
+
+fn should_stop_after_key(input_mode: InputMode, key: &KeyEvent) -> bool {
+    input_mode == InputMode::Comment
+        || (key.kind == KeyEventKind::Press && !is_cursor_navigation_key(key))
 }
 
 fn main() -> anyhow::Result<()> {
@@ -450,9 +467,7 @@ fn main() -> anyhow::Result<()> {
             needs_redraw = true;
             let event = event::read()?;
             stop_after_input |= matches!(&event, Event::Paste(_))
-                || matches!(&event, Event::Key(key)
-                    if app.input_mode == InputMode::Comment
-                        || key.kind == KeyEventKind::Press);
+                || matches!(&event, Event::Key(key) if should_stop_after_key(app.input_mode, key));
             // Down/Up Release flips the `*_released_since_arm` flag so the
             // primed two-press file walk in single-file view requires a
             // deliberate release + press; held-key auto-repeat (Repeat
@@ -981,5 +996,24 @@ mod tests {
             None,
             "a capped burst must repaint instead of draining forever"
         );
+    }
+
+    #[test]
+    fn navigation_presses_drain_with_queued_repeats() {
+        let nav = crossterm::event::KeyEvent::new(
+            KeyCode::Char('j'),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        let arrow =
+            crossterm::event::KeyEvent::new(KeyCode::Down, crossterm::event::KeyModifiers::NONE);
+        let other = crossterm::event::KeyEvent::new(
+            KeyCode::Char('x'),
+            crossterm::event::KeyModifiers::NONE,
+        );
+
+        assert!(!should_stop_after_key(InputMode::Normal, &nav));
+        assert!(!should_stop_after_key(InputMode::Normal, &arrow));
+        assert!(should_stop_after_key(InputMode::Normal, &other));
+        assert!(should_stop_after_key(InputMode::Comment, &nav));
     }
 }
