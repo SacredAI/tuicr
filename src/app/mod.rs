@@ -470,15 +470,15 @@ pub fn annotation_file_idx(annotation: &AnnotatedLine) -> Option<usize> {
         | AnnotatedLine::SideBySideLine { file_idx, .. }
         | AnnotatedLine::LineComment { file_idx, .. }
         | AnnotatedLine::BinaryOrEmpty { file_idx } => Some(*file_idx),
+        AnnotatedLine::Expander { gap_id, .. }
+        | AnnotatedLine::HiddenLines { gap_id, .. }
+        | AnnotatedLine::ExpandedContext { gap_id, .. } => Some(gap_id.file_idx),
         AnnotatedLine::PrInfoLine { .. }
         | AnnotatedLine::IssueCommentsHeader
         | AnnotatedLine::IssueComment { .. }
         | AnnotatedLine::ReviewCommentsHeader
         | AnnotatedLine::ReviewComment { .. }
         | AnnotatedLine::RemoteReviewSummaryLine { .. }
-        | AnnotatedLine::Expander { .. }
-        | AnnotatedLine::HiddenLines { .. }
-        | AnnotatedLine::ExpandedContext { .. }
         | AnnotatedLine::RemoteThreadLine { .. }
         | AnnotatedLine::Spacing => None,
     }

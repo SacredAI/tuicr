@@ -1388,26 +1388,35 @@ impl App {
         if self.is_single_file_view {
             return;
         }
-        let mut cumulative = self.review_comments_render_height();
-        if self.diff_state.cursor_line < cumulative {
-            if !self.diff_files.is_empty() {
-                self.diff_state.current_file_idx = 0;
-                self.file_list_state.select(0);
-            }
+        // `line_annotations` is the render-order index already built for
+        // cursor hit-testing. Navigation used to recompute every file's full
+        // rendered height here, which made each j/k O(total PR lines).
+        // Decorations outside a file (review-level content and inter-file
+        // spacing) are uncommon; scan only when the cursor lands on one.
+        if let Some(file_idx) = self
+            .line_annotations
+            .get(self.diff_state.cursor_line)
+            .and_then(annotation_file_idx)
+        {
+            self.diff_state.current_file_idx = file_idx;
+            self.file_list_state.select(file_idx);
             return;
         }
-        for (i, file) in self.diff_files.iter().enumerate() {
-            let height = self.file_render_height(i, file);
-            if cumulative + height > self.diff_state.cursor_line {
-                self.diff_state.current_file_idx = i;
-                self.file_list_state.select(i);
-                return;
-            }
-            cumulative += height;
+
+        if self.diff_files.is_empty() {
+            return;
         }
-        if !self.diff_files.is_empty() {
-            self.diff_state.current_file_idx = self.diff_files.len() - 1;
-            self.file_list_state.select(self.diff_files.len() - 1);
+        let cursor = self
+            .diff_state
+            .cursor_line
+            .min(self.line_annotations.len().saturating_sub(1));
+        let nearest = (0..=cursor)
+            .rev()
+            .chain(cursor.saturating_add(1)..self.line_annotations.len())
+            .find_map(|idx| self.line_annotations.get(idx).and_then(annotation_file_idx));
+        if let Some(file_idx) = nearest {
+            self.diff_state.current_file_idx = file_idx;
+            self.file_list_state.select(file_idx);
         }
     }
 
@@ -1424,7 +1433,10 @@ impl App {
     /// Last line the cursor can occupy. If the final annotation is a Spacing
     /// separator it is not navigable content and is excluded.
     pub fn max_cursor_line(&self) -> usize {
-        let total = self.total_lines();
+        // `line_annotations` is kept row-parallel with both diff renderers.
+        // Do not call `total_lines()` here: it walks every hunk and comment,
+        // putting an O(total PR size) operation on every j/k press.
+        let total = self.line_annotations.len();
         if matches!(self.line_annotations.last(), Some(AnnotatedLine::Spacing)) {
             total.saturating_sub(2)
         } else {
@@ -1438,7 +1450,7 @@ impl App {
     /// This permits empty space below content (e.g. when centering the cursor near EOF)
     /// while ensuring there is always at least one line of content visible at the top.
     pub fn max_scroll_offset(&self) -> usize {
-        self.total_lines().saturating_sub(1)
+        self.line_annotations.len().saturating_sub(1)
     }
 
     /// Calculate the number of display lines a comment takes (header + content + footer).

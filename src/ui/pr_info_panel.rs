@@ -10,7 +10,7 @@ use crate::forge::traits::{
 use crate::model::CommentType;
 use crate::theme::Theme;
 use crate::ui::comment_panel::{self, CommentTypePresentation};
-use crate::ui::diff_view::{HEADER_RULE, cursor_indicator, cursor_indicator_spaced};
+use crate::ui::diff_view::{HEADER_RULE, LineBuffer, cursor_indicator, cursor_indicator_spaced};
 use crate::ui::styles;
 
 /// Every rendered PR-info line is prefixed with a two-column cursor indicator
@@ -20,6 +20,22 @@ use crate::ui::styles;
 /// desyncs from the rendered `Vec<Line>` and cursor↔line mapping drifts for
 /// every row below the panel.
 pub(crate) const PR_INFO_INDICATOR_WIDTH: usize = 2;
+
+pub(crate) trait LineSink {
+    fn push_line(&mut self, line: Line<'static>);
+}
+
+impl LineSink for Vec<Line<'static>> {
+    fn push_line(&mut self, line: Line<'static>) {
+        self.push(line);
+    }
+}
+
+impl LineSink for LineBuffer {
+    fn push_line(&mut self, line: Line<'static>) {
+        self.push(line);
+    }
+}
 
 /// Width available for wrapped PR-info content at the given viewport width.
 pub(crate) fn pr_info_content_width(viewport_width: usize) -> usize {
@@ -67,9 +83,9 @@ pub fn is_cursor_in_issue_comments(app: &App) -> bool {
     end > start && (start..end).contains(&app.diff_state.cursor_line)
 }
 
-pub fn append_pr_info_section(
+pub(crate) fn append_pr_info_section<L: LineSink>(
     app: &App,
-    lines: &mut Vec<Line<'static>>,
+    lines: &mut L,
     line_idx: &mut usize,
     current_line_idx: usize,
 ) {
@@ -84,7 +100,7 @@ pub fn append_pr_info_section(
             0,
             Span::styled(indicator, styles::current_line_indicator_style(&app.theme)),
         );
-        lines.push(pr_line);
+        lines.push_line(pr_line);
         *line_idx += 1;
     }
 }
@@ -94,9 +110,9 @@ pub fn append_pr_info_section(
 /// comments sit at the very top of the document, so for most of a review they
 /// are scrolled past — and formatting them costs the same markdown pass as any
 /// other comment box.
-pub fn append_issue_comments_section(
+pub(super) fn append_issue_comments_section(
     app: &App,
-    lines: &mut Vec<Line<'static>>,
+    lines: &mut LineBuffer,
     line_idx: &mut usize,
     current_line_idx: usize,
     content_width: usize,

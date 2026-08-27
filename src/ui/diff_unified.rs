@@ -15,11 +15,12 @@ use crate::model::{FileStatus, LineOrigin, LineRange, LineSide};
 use crate::theme::Theme;
 use crate::ui::comment_panel;
 use crate::ui::diff_view::{
-    apply_horizontal_scroll, comment_box_visible, comment_type_presentation, cursor_indicator,
-    cursor_indicator_spaced, diff_line_content_spans, diff_stat_title, hunk_header_text_and_style,
-    paint_cursor_line_highlight, paint_unified_diff_rows_with, paint_visual_selection_overlay,
-    populate_row_to_annotation, push_comment_bar, render_expander_line, render_hidden_lines,
-    scroll_comment_input_into_view, skip_comment_box, unified_line_bg_style,
+    LineBuffer, apply_horizontal_scroll, clear_diff_area, comment_box_visible,
+    comment_type_presentation, cursor_indicator, cursor_indicator_spaced, diff_line_content_spans,
+    diff_stat_title, hunk_header_text_and_style, paint_cursor_line_highlight,
+    paint_unified_diff_rows_with, paint_visual_selection_overlay, populate_row_to_annotation,
+    push_comment_bar, render_expander_line, render_hidden_lines, scroll_comment_input_into_view,
+    skip_comment_box, unified_line_bg_style,
 };
 use crate::ui::styles;
 use crate::vcs::git::calculate_gap;
@@ -39,6 +40,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
     let inner = block.inner(area);
     let comment_width = inner.width.saturating_sub(1) as usize;
     frame.render_widget(block, area);
+    clear_diff_area(frame, inner, &app.theme);
 
     // Update viewport height for scroll calculations
     app.diff_state.viewport_height = inner.height as usize;
@@ -53,16 +55,20 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
 
     // Build all diff lines for infinite scroll
     // Track line index to mark the current line (cursor position)
-    let mut lines: Vec<Line> = Vec::new();
+    let (visible_start, visible_end) = crate::ui::diff_view::diff_visible_range(app, inner);
+    let mut lines = LineBuffer::new(visible_start, visible_end);
+    lines.retain_range(
+        app.diff_state.scroll_offset,
+        app.diff_state
+            .scroll_offset
+            .saturating_add(inner.height as usize),
+    );
     let mut line_idx: usize = 0;
     let current_line_idx = app.diff_state.cursor_line;
 
-    // Only build the expensive per-diff-line spans for lines that are actually
-    // visible. Everything else still pushes (cheap) so `lines.len()` keeps
-    // matching `line_idx`, but the hot inner loops push `Line::default()` for
-    // off-screen rows. In Comment mode the scroll offset may be adjusted after
-    // building, so fall back to a full build there.
-    let (visible_start, visible_end) = crate::ui::diff_view::diff_visible_range(app, inner);
+    // Only retain rows that are actually visible. The buffer still tracks the
+    // complete logical row count, so comments, navigation, and auto-scroll keep
+    // their existing coordinates without allocating the off-screen document.
     let search_style = styles::search_match_style(&app.theme);
 
     // Track cursor position for IME when in Comment mode
@@ -1210,14 +1216,11 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
         comment_input_box_range,
         comment_cursor_logical_line,
         inner.height as usize,
-        lines.len(),
+        lines.logical_len(),
     );
 
-    let visible_lines_unscrolled: Vec<Line> = lines
-        .into_iter()
-        .skip(app.diff_state.scroll_offset)
-        .take(inner.height as usize)
-        .collect();
+    let visible_lines_unscrolled =
+        lines.into_viewport(app.diff_state.scroll_offset, inner.height as usize);
 
     // Calculate the width of each line for max_content_width and visible line count
     let line_widths: Vec<usize> = visible_lines_unscrolled
@@ -1383,7 +1386,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
 /// the spec; visible-but-resolved threads only render under `:comments all`.
 #[allow(clippy::too_many_arguments)]
 fn render_remote_threads_for_anchor(
-    lines: &mut Vec<ratatui::text::Line<'static>>,
+    lines: &mut LineBuffer,
     line_idx: &mut usize,
     current_line_idx: usize,
     app: &App,
@@ -1455,7 +1458,7 @@ fn render_remote_threads_for_anchor(
 /// Render a single expanded context line (shared by unified + side-by-side via unified path)
 #[allow(clippy::too_many_arguments)]
 fn render_expanded_context_line(
-    lines: &mut Vec<Line<'_>>,
+    lines: &mut LineBuffer,
     line_idx: &mut usize,
     current_line_idx: usize,
     expanded_line: &crate::model::DiffLine,

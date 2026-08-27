@@ -30,6 +30,75 @@ pub(super) const REVIEW_COMMENTS_HEADER_PREFIX: &str = "═══ Review Comment
 /// measured height cannot drift apart.
 pub(super) const REVIEWED_BANNER_TEXT: &str = "  Marked reviewed -- r to re-open";
 
+/// Logical diff rows are much larger than the terminal viewport on large PRs.
+/// Keep the logical row counter in the renderers, but retain only rows that can
+/// be displayed this frame. This avoids allocating one placeholder `Line` per
+/// off-screen source line while preserving the existing row mapping.
+pub(super) struct LineBuffer {
+    lines: Vec<(usize, Line<'static>)>,
+    ranges: Vec<(usize, usize)>,
+    logical_len: usize,
+}
+
+impl LineBuffer {
+    pub(super) fn new(visible_start: usize, visible_end: usize) -> Self {
+        Self {
+            lines: Vec::new(),
+            ranges: vec![(visible_start, visible_end)],
+            logical_len: 0,
+        }
+    }
+
+    pub(super) fn retain_range(&mut self, start: usize, end: usize) {
+        self.ranges.push((start, end));
+    }
+
+    pub(super) fn push(&mut self, line: Line<'static>) {
+        if self
+            .ranges
+            .iter()
+            .any(|(start, end)| self.logical_len >= *start && self.logical_len < *end)
+        {
+            self.lines.push((self.logical_len, line));
+        }
+        self.logical_len += 1;
+    }
+
+    pub(super) fn skip(&mut self, rows: usize) {
+        self.logical_len = self.logical_len.saturating_add(rows);
+    }
+
+    pub(super) fn logical_len(&self) -> usize {
+        self.logical_len
+    }
+
+    pub(super) fn into_viewport(self, scroll_offset: usize, height: usize) -> Vec<Line<'static>> {
+        self.lines
+            .into_iter()
+            .filter_map(|(line_idx, line)| {
+                (line_idx >= scroll_offset && line_idx < scroll_offset.saturating_add(height))
+                    .then_some(line)
+            })
+            .collect()
+    }
+}
+
+/// Empty rows must overwrite the previous frame's symbols. An empty ratatui
+/// `Line` only changes cell style, so using it for off-screen placeholders can
+/// otherwise leak old source text into the next frame.
+pub(super) fn clear_diff_area(frame: &mut Frame, area: Rect, theme: &Theme) {
+    if area.is_empty() {
+        return;
+    }
+    let blank = " ".repeat(area.width as usize);
+    let style = styles::panel_style(theme);
+    for y in area.top()..area.bottom() {
+        frame
+            .buffer_mut()
+            .set_stringn(area.x, y, &blank, area.width as usize, style);
+    }
+}
+
 /// Text portion of a per-file section header, without the trailing
 /// `HEADER_RULE`. Callers concatenate `HEADER_RULE` themselves so the rule
 /// can be styled as a separate span (both renderers) or absorbed into a
@@ -213,7 +282,7 @@ pub(super) struct BinaryPaneAnchor {
 pub(super) fn push_binary_block(
     app: &App,
     display_path: &std::path::Path,
-    lines: &mut Vec<Line<'static>>,
+    lines: &mut LineBuffer,
     line_idx: &mut usize,
     current_line_idx: usize,
     anchors: &mut Vec<BinaryPaneAnchor>,
@@ -483,7 +552,7 @@ pub(super) fn hunk_header_text_and_style(
 
 /// Render an expander line with direction arrow
 pub(super) fn render_expander_line(
-    lines: &mut Vec<Line<'_>>,
+    lines: &mut LineBuffer,
     line_idx: &mut usize,
     current_line_idx: usize,
     direction: ExpandDirection,
@@ -503,7 +572,7 @@ pub(super) fn render_expander_line(
 
 /// Render a "N lines hidden" informational line
 pub(super) fn render_hidden_lines(
-    lines: &mut Vec<Line<'_>>,
+    lines: &mut LineBuffer,
     line_idx: &mut usize,
     current_line_idx: usize,
     count: usize,
@@ -984,14 +1053,13 @@ pub(super) fn comment_box_visible(top: usize, rows: usize, visible: (usize, usiz
     top < visible_end && top.saturating_add(rows) > visible_start
 }
 
-/// Stand in for an off-screen comment box with `rows` blank rows, so
-/// `lines.len()` and `line_idx` stay exact without paying for its spans.
+/// Advance past an off-screen comment box without paying for its spans.
 ///
 /// `rows` comes from `App::comment_display_lines`, the same mirror the
 /// annotation builder uses to keep `line_annotations` aligned with the rendered
 /// document — if it were ever wrong, navigation would already be broken.
-pub(super) fn skip_comment_box(lines: &mut Vec<Line<'_>>, line_idx: &mut usize, rows: usize) {
-    lines.extend(std::iter::repeat_with(Line::default).take(rows));
+pub(super) fn skip_comment_box(lines: &mut LineBuffer, line_idx: &mut usize, rows: usize) {
+    lines.skip(rows);
     *line_idx += rows;
 }
 
@@ -1519,5 +1587,23 @@ mod tests {
         let (start, end) = diff_visible_range_for(InputMode::Normal, 10_000, 120, 40);
 
         assert_eq!((start, end), (120, 160));
+    }
+
+    #[test]
+    fn line_buffer_tracks_logical_rows_without_storing_offscreen_lines() {
+        let mut buffer = LineBuffer::new(3, 5);
+        for n in 0..10 {
+            buffer.push(Line::from(n.to_string()));
+        }
+
+        assert_eq!(buffer.logical_len(), 10);
+        let lines = buffer.into_viewport(3, 2);
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| line.spans[0].content.as_ref())
+                .collect::<Vec<_>>(),
+            vec!["3", "4"]
+        );
     }
 }

@@ -14,10 +14,10 @@ use crate::model::{DiffLine, FileStatus, LineOrigin, LineRange, LineSide};
 use crate::theme::Theme;
 use crate::ui::comment_panel;
 use crate::ui::diff_view::{
-    apply_horizontal_scroll, comment_type_presentation, cursor_indicator, cursor_indicator_spaced,
-    diff_stat_title, hunk_header_text_and_style, paint_cursor_line_highlight,
-    paint_visual_selection_overlay, populate_row_to_annotation, render_expander_line,
-    render_hidden_lines, scroll_comment_input_into_view, skip_comment_box,
+    LineBuffer, apply_horizontal_scroll, clear_diff_area, comment_type_presentation,
+    cursor_indicator, cursor_indicator_spaced, diff_stat_title, hunk_header_text_and_style,
+    paint_cursor_line_highlight, paint_visual_selection_overlay, populate_row_to_annotation,
+    render_expander_line, render_hidden_lines, scroll_comment_input_into_view, skip_comment_box,
 };
 use crate::ui::styles;
 use crate::ui::text_utils::{
@@ -238,6 +238,7 @@ pub(super) fn render_side_by_side_diff(frame: &mut Frame, app: &mut App, area: R
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    clear_diff_area(frame, inner, &app.theme);
 
     // Update viewport height for scroll calculations
     app.diff_state.viewport_height = inner.height as usize;
@@ -282,7 +283,13 @@ pub(super) fn render_side_by_side_diff(frame: &mut Frame, app: &mut App, area: R
     };
 
     // Build all diff lines for side-by-side view
-    let mut lines: Vec<Line> = Vec::new();
+    let mut lines = LineBuffer::new(visible_start, visible_end);
+    lines.retain_range(
+        app.diff_state.scroll_offset,
+        app.diff_state
+            .scroll_offset
+            .saturating_add(inner.height as usize),
+    );
     let mut line_idx: usize = 0;
     let mut binary_panes = Vec::new();
 
@@ -913,14 +920,11 @@ pub(super) fn render_side_by_side_diff(frame: &mut Frame, app: &mut App, area: R
         comment_input_box_range,
         comment_cursor_logical_line,
         inner.height as usize,
-        lines.len(),
+        lines.logical_len(),
     );
 
-    let visible_lines_unscrolled: Vec<Line> = lines
-        .into_iter()
-        .skip(app.diff_state.scroll_offset)
-        .take(inner.height as usize)
-        .collect();
+    let visible_lines_unscrolled =
+        lines.into_viewport(app.diff_state.scroll_offset, inner.height as usize);
 
     // Calculate the width of each line for max_content_width and visible line count
     let line_widths: Vec<usize> = visible_lines_unscrolled
@@ -1103,7 +1107,7 @@ pub(super) fn render_side_by_side_diff(frame: &mut Frame, app: &mut App, area: R
 
 /// Render a single expanded context line in side-by-side mode
 fn render_sbs_expanded_context_line(
-    lines: &mut Vec<Line<'_>>,
+    lines: &mut LineBuffer,
     line_idx: &mut usize,
     expanded_line: &crate::model::DiffLine,
     ctx: &SideBySideContext,
@@ -1178,7 +1182,7 @@ fn render_hunk_lines_side_by_side(
     ctx: &SideBySideContext,
     file_idx: usize,
     mut line_idx: usize,
-    lines: &mut Vec<Line>,
+    lines: &mut LineBuffer,
 ) -> (usize, Option<SideBySideCursorInfo>) {
     let mut i = 0;
     let mut cursor_info_out: Option<SideBySideCursorInfo> = None;
@@ -1272,7 +1276,7 @@ fn render_context_line_side_by_side(
     ctx: &SideBySideContext,
     file_idx: usize,
     mut line_idx: usize,
-    lines: &mut Vec<Line>,
+    lines: &mut LineBuffer,
 ) -> (usize, Option<SideBySideCursorInfo>) {
     if ctx.is_visible(line_idx) {
         let w = ctx.lineno_width;
@@ -1401,7 +1405,7 @@ fn render_deletion_addition_pair_side_by_side(
     ctx: &SideBySideContext,
     file_idx: usize,
     mut line_idx: usize,
-    lines: &mut Vec<Line>,
+    lines: &mut LineBuffer,
 ) -> (usize, usize, Option<SideBySideCursorInfo>) {
     // Find the range of consecutive deletions
     let mut del_end = start_idx + 1;
@@ -1601,7 +1605,7 @@ fn render_standalone_addition_side_by_side(
     ctx: &SideBySideContext,
     file_idx: usize,
     mut line_idx: usize,
-    lines: &mut Vec<Line>,
+    lines: &mut LineBuffer,
 ) -> (usize, Option<SideBySideCursorInfo>) {
     if ctx.is_visible(line_idx) {
         let indicator = cursor_indicator(line_idx, ctx.current_line_idx);
@@ -1704,7 +1708,7 @@ fn render_commit_message_line_side_by_side(
     ctx: &SideBySideContext,
     file_idx: usize,
     mut line_idx: usize,
-    lines: &mut Vec<Line>,
+    lines: &mut LineBuffer,
 ) -> (usize, Option<SideBySideCursorInfo>) {
     let ctx_style = styles::diff_context_style(ctx.theme);
 
@@ -1844,7 +1848,7 @@ fn add_remote_threads_to_line(
     ctx: &SideBySideContext,
     file_path: &std::path::Path,
     mut line_idx: usize,
-    lines: &mut Vec<Line>,
+    lines: &mut LineBuffer,
 ) -> usize {
     use crate::forge::remote_comments::{PrCommentsVisibility, RemoteCommentSide};
     let visibility = ctx.app.session.remote_comments_visibility;
@@ -1904,7 +1908,7 @@ fn add_comments_to_line(
     ctx: &SideBySideContext,
     file_idx: usize,
     mut line_idx: usize,
-    lines: &mut Vec<Line>,
+    lines: &mut LineBuffer,
 ) -> (usize, Option<SideBySideCursorInfo>) {
     // Check if we're adding/editing a comment on this line and side
     let is_line_comment_mode = ctx.comment_input_mode
