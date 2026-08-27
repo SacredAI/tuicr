@@ -180,6 +180,7 @@ Repository-managed agent integrations:
 - **Diff flags are pinned, not inherited**: the Git CLI backend passes `--diff-algorithm=histogram` and `--indent-heuristic` (see `pin_diff_flags`), and the libgit2 backend sets `indent_heuristic` — which libgit2, unlike the Git CLI, leaves off by default. A review must not change shape with the user's `diff.*` config. libgit2 has no histogram equivalent, so the two Git backends can pick different hunk boundaries on the same commit.
 - **Word-level highlight**: `DiffLine.intraline` holds byte ranges into `content`. `ui::diff_view::diff_line_content_spans` is the single place that splits a line's spans on them; both diff views go through it.
 - **Large-review rendering**: Diff renderers build full styled spans only for the viewport. While a comment is being edited, the range is centered on the cursor with a bounded safety window; off-window rows remain cheap placeholders so comment typing does not reformat an entire large PR on every keystroke.
+- **Input repainting**: The main loop coalesces non-key event bursts, but a keyboard or paste event ends the burst so navigation and text input repaint immediately rather than waiting for queued repeats or release events.
 
 ### Dependencies
 

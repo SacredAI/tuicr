@@ -41,7 +41,10 @@ const EVENT_DRAIN_LIMIT: usize = 32;
 /// How long the loop may wait for the next event after already consuming
 /// `drained` of them: the first blocks so an idle TUI costs nothing, later ones
 /// are only taken if already queued. `None` ends the burst.
-fn event_drain_timeout(drained: usize) -> Option<Duration> {
+fn event_drain_timeout(drained: usize, input_seen: bool) -> Option<Duration> {
+    if input_seen {
+        return None;
+    }
     match drained {
         0 => Some(Duration::from_millis(50)),
         n if n < EVENT_DRAIN_LIMIT => Some(Duration::ZERO),
@@ -437,13 +440,13 @@ fn main() -> anyhow::Result<()> {
             needs_redraw = false;
         }
 
-        // Handle events. Every already-queued event is consumed before the next
-        // repaint: a trackpad gesture or held key delivers events faster than a
-        // terminal presents frames, and the intermediate frames are never seen.
-        // `drained` caps a burst so continuous input still repaints.
+        // Handle events. Non-key bursts (especially trackpad gestures) are
+        // coalesced before repainting, but keyboard input gets a frame of its
+        // own so navigation and typing respond on the initial press.
         let mut drained = 0;
+        let mut input_seen = false;
         while !app.should_quit
-            && let Some(timeout) = event_drain_timeout(drained)
+            && let Some(timeout) = event_drain_timeout(drained, input_seen)
             && event::poll(timeout)?
         {
             drained += 1;
@@ -452,6 +455,7 @@ fn main() -> anyhow::Result<()> {
             // next iteration even though they short-circuit past the match.
             needs_redraw = true;
             let event = event::read()?;
+            input_seen |= matches!(&event, Event::Key(_) | Event::Paste(_));
             // Down/Up Release flips the `*_released_since_arm` flag so the
             // primed two-press file walk in single-file view requires a
             // deliberate release + press; held-key auto-repeat (Repeat
@@ -961,17 +965,22 @@ mod tests {
     #[test]
     fn drain_blocks_once_then_takes_only_queued_events() {
         assert_eq!(
-            event_drain_timeout(0),
+            event_drain_timeout(0, false),
             Some(Duration::from_millis(50)),
             "the first poll must block, or an idle TUI spins"
         );
-        assert_eq!(event_drain_timeout(1), Some(Duration::ZERO));
+        assert_eq!(event_drain_timeout(1, false), Some(Duration::ZERO));
         assert_eq!(
-            event_drain_timeout(EVENT_DRAIN_LIMIT - 1),
+            event_drain_timeout(1, true),
+            None,
+            "a keyboard event must trigger a repaint before queued repeats"
+        );
+        assert_eq!(
+            event_drain_timeout(EVENT_DRAIN_LIMIT - 1, false),
             Some(Duration::ZERO)
         );
         assert_eq!(
-            event_drain_timeout(EVENT_DRAIN_LIMIT),
+            event_drain_timeout(EVENT_DRAIN_LIMIT, false),
             None,
             "a capped burst must repaint instead of draining forever"
         );
