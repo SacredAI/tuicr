@@ -41,8 +41,8 @@ const EVENT_DRAIN_LIMIT: usize = 32;
 /// How long the loop may wait for the next event after already consuming
 /// `drained` of them: the first blocks so an idle TUI costs nothing, later ones
 /// are only taken if already queued. `None` ends the burst.
-fn event_drain_timeout(drained: usize, input_seen: bool) -> Option<Duration> {
-    if input_seen {
+fn event_drain_timeout(drained: usize, stop_after_press: bool) -> Option<Duration> {
+    if stop_after_press {
         return None;
     }
     match drained {
@@ -441,12 +441,14 @@ fn main() -> anyhow::Result<()> {
         }
 
         // Handle events. Non-key bursts (especially trackpad gestures) are
-        // coalesced before repainting, but keyboard input gets a frame of its
-        // own so navigation and typing respond on the initial press.
+        // coalesced before repainting. A new keyboard press gets a frame of
+        // its own so navigation and typing respond immediately; subsequent
+        // repeat events are drained together so a held key can stop promptly
+        // when its release arrives.
         let mut drained = 0;
-        let mut input_seen = false;
+        let mut stop_after_press = false;
         while !app.should_quit
-            && let Some(timeout) = event_drain_timeout(drained, input_seen)
+            && let Some(timeout) = event_drain_timeout(drained, stop_after_press)
             && event::poll(timeout)?
         {
             drained += 1;
@@ -455,7 +457,10 @@ fn main() -> anyhow::Result<()> {
             // next iteration even though they short-circuit past the match.
             needs_redraw = true;
             let event = event::read()?;
-            input_seen |= matches!(&event, Event::Key(_) | Event::Paste(_));
+            stop_after_press |= matches!(
+                &event,
+                Event::Key(key) if key.kind == KeyEventKind::Press
+            ) || matches!(&event, Event::Paste(_));
             // Down/Up Release flips the `*_released_since_arm` flag so the
             // primed two-press file walk in single-file view requires a
             // deliberate release + press; held-key auto-repeat (Repeat
@@ -973,7 +978,7 @@ mod tests {
         assert_eq!(
             event_drain_timeout(1, true),
             None,
-            "a keyboard event must trigger a repaint before queued repeats"
+            "a new key press must trigger a repaint before queued repeats"
         );
         assert_eq!(
             event_drain_timeout(EVENT_DRAIN_LIMIT - 1, false),
