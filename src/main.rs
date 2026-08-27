@@ -5,8 +5,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::{
     event::{self, Event, KeyEventKind},
-    execute, queue,
-    terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate, supports_keyboard_enhancement},
+    terminal::supports_keyboard_enhancement,
 };
 
 use tuicr::app::{self, App, AppStartupOptions, FocusedPanel, InputMode};
@@ -41,8 +40,8 @@ const EVENT_DRAIN_LIMIT: usize = 32;
 /// How long the loop may wait for the next event after already consuming
 /// `drained` of them: the first blocks so an idle TUI costs nothing, later ones
 /// are only taken if already queued. `None` ends the burst.
-fn event_drain_timeout(drained: usize, stop_after_press: bool) -> Option<Duration> {
-    if stop_after_press {
+fn event_drain_timeout(drained: usize, stop_after_input: bool) -> Option<Duration> {
+    if stop_after_input {
         return None;
     }
     match drained {
@@ -427,16 +426,9 @@ fn main() -> anyhow::Result<()> {
         needs_redraw |= pr_pending;
 
         if needs_redraw {
-            // Bracket the frame in a synchronized-output pair (CSI ?2026h/l)
-            // so terminals (and zellij) buffer the whole repaint and present
-            // it atomically. Without this, scrolling over a slow link visibly
-            // tears as escape sequences arrive in chunks. Terminals that do
-            // not support DEC 2026 ignore it.
-            queue!(terminal.backend_mut(), BeginSynchronizedUpdate)?;
             terminal.draw(|frame| {
                 ui::render(frame, &mut app);
             })?;
-            execute!(terminal.backend_mut(), EndSynchronizedUpdate)?;
             needs_redraw = false;
         }
 
@@ -446,9 +438,9 @@ fn main() -> anyhow::Result<()> {
         // repeat events are drained together so a held key can stop promptly
         // when its release arrives.
         let mut drained = 0;
-        let mut stop_after_press = false;
+        let mut stop_after_input = false;
         while !app.should_quit
-            && let Some(timeout) = event_drain_timeout(drained, stop_after_press)
+            && let Some(timeout) = event_drain_timeout(drained, stop_after_input)
             && event::poll(timeout)?
         {
             drained += 1;
@@ -457,10 +449,10 @@ fn main() -> anyhow::Result<()> {
             // next iteration even though they short-circuit past the match.
             needs_redraw = true;
             let event = event::read()?;
-            stop_after_press |= matches!(
-                &event,
-                Event::Key(key) if key.kind == KeyEventKind::Press
-            ) || matches!(&event, Event::Paste(_));
+            stop_after_input |= matches!(&event, Event::Paste(_))
+                || matches!(&event, Event::Key(key)
+                    if app.input_mode == InputMode::Comment
+                        || key.kind == KeyEventKind::Press);
             // Down/Up Release flips the `*_released_since_arm` flag so the
             // primed two-press file walk in single-file view requires a
             // deliberate release + press; held-key auto-repeat (Repeat

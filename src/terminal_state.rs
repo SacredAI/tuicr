@@ -1,12 +1,16 @@
 use std::io::{self, Write};
 
 use crossterm::{
+    cursor::MoveTo,
     event::{
         DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
         KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{
+        Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+        enable_raw_mode,
+    },
 };
 use ratatui::{Frame, Terminal, backend::CrosstermBackend};
 
@@ -83,9 +87,6 @@ impl<W: Write> TerminalSession<W> {
     }
 
     /// Returns the terminal backend for low-level terminal commands.
-    ///
-    /// This is used for synchronized-update escape sequences that ratatui does
-    /// not manage directly.
     pub fn backend_mut(&mut self) -> &mut CrosstermBackend<W> {
         self.terminal.backend_mut()
     }
@@ -209,7 +210,16 @@ pub fn restore_stdio_best_effort() {
 
 fn activate_writer<W: Write>(writer: &mut W, features: TerminalFeatures) -> anyhow::Result<()> {
     enable_raw_mode()?;
-    execute!(writer, EnterAlternateScreen)?;
+    // Alternate-screen contents are retained by some terminals/multiplexers.
+    // Clear it before the first ratatui frame so stale cells (including raw
+    // escape-sequence fragments from a previous program) cannot appear above
+    // the new UI. This matters especially when reconnecting over SSH.
+    execute!(
+        writer,
+        EnterAlternateScreen,
+        Clear(ClearType::All),
+        MoveTo(0, 0)
+    )?;
     if features.mouse_enabled {
         execute!(writer, EnableMouseCapture)?;
     }

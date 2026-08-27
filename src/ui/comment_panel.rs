@@ -199,9 +199,10 @@ pub fn format_comment_input_lines(
         // cursor_column is already BORDER_PREFIX_WIDTH (cursor at start of content)
     } else {
         let buffer_lines: Vec<&str> = buffer.split('\n').collect();
-        // Markdown-highlight the in-progress text; colors come from the active
-        // syntect theme (same engine/theme as diff code highlighting).
-        let highlighted = theme.syntax_highlighter().highlight_markdown_body(buffer);
+        // Keep the edit path allocation-light. Parsing/highlighting the whole
+        // buffer on every keystroke is needlessly visible over SSH, especially
+        // for a long draft. The saved/displayed comment still gets the normal
+        // markdown highlighting in `format_comment_lines`.
         let mut byte_offset = 0;
         // Tracks how many visual lines have been pushed so far (not counting the header).
         let mut total_visual_lines: usize = 0;
@@ -229,7 +230,7 @@ pub fn format_comment_input_lines(
                     && (cursor_pos < seg_end || is_last_seg);
 
                 let mut line_spans = vec![Span::styled(BORDER_PREFIX, border_style)];
-                let line_runs = highlighted.get(line_idx).and_then(|o| o.as_deref());
+                let line_runs = None;
                 let seg_end_in_line = seg_byte_start + seg.len();
 
                 if cursor_in_seg {
@@ -1043,17 +1044,13 @@ mod tests {
     }
 
     #[test]
-    fn markdown_highlighting_splits_line_into_runs() {
-        // An inline-code line should yield multiple styled content spans (proof
-        // the markdown grammar resolved and coloring is applied), not one raw
-        // span. Cursor at end so no cursor cell splits the line artificially.
+    fn comment_input_keeps_editing_text_unhighlighted() {
+        // The input path intentionally avoids parsing the whole draft on each
+        // keystroke. Displayed comments are still markdown-highlighted below.
         let buffer = "plain `code` plain";
         let lines = render_md(buffer, buffer.len());
         let content_spans = lines[1].spans.len() - 1; // minus BORDER_PREFIX
-        assert!(
-            content_spans > 1,
-            "expected markdown highlighting to split the line, got {content_spans} span(s)"
-        );
+        assert_eq!(content_spans, 1);
     }
 
     #[test]
